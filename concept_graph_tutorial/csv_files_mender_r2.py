@@ -46,7 +46,7 @@ def learn_from_correct_format(content: str) -> Dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PHASE 2: DETECT AND PARSE INCORRECT FORMAT (SIMPLIFIED & ROBUST)
+# PHASE 2: DETECT AND PARSE INCORRECT FORMAT (ROBUST QUOTED‑FIELD PARSER)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def detect_format_type(content: str) -> Literal['correct', 'incorrect', 'unknown']:
@@ -68,61 +68,74 @@ def detect_format_type(content: str) -> Literal['correct', 'incorrect', 'unknown
     return 'unknown'
 
 
+def extract_quoted_fields(line: str) -> List[str]:
+    """
+    Extract all quoted strings from a line, handling escaped double quotes.
+    Returns list of field values in the order they appear.
+    """
+    fields = []
+    i = 0
+    n = len(line)
+    while i < n:
+        if line[i] == '"':
+            # start of a field
+            field_chars = []
+            i += 1
+            while i < n:
+                if line[i] == '"':
+                    # check if next is also quote (escaped)
+                    if i + 1 < n and line[i+1] == '"':
+                        field_chars.append('"')
+                        i += 2  # skip both quotes
+                    else:
+                        # end of field
+                        i += 1
+                        break
+                else:
+                    field_chars.append(line[i])
+                    i += 1
+            fields.append(''.join(field_chars))
+        else:
+            i += 1
+    return fields
+
+
 def parse_incorrect_format(content: str, learned_structure: Dict) -> pd.DataFrame:
     """
-    Parse incorrect Scopus CSV format by first cleaning the file:
-    1. Remove trailing semicolons
-    2. Replace all occurrences of "" with ","  -> fixes missing delimiter
-    3. Then parse as standard CSV with pandas.
+    Parse incorrect Scopus CSV by extracting quoted fields from each row.
+    Ignores all separators (commas, semicolons) between fields.
     """
     lines = content.strip().split('\n')
     if not lines:
         return pd.DataFrame(columns=learned_structure['columns'])
     
-    cleaned_lines = []
-    for line in lines:
+    expected_cols = learned_structure['columns']
+    
+    # Find the first data row (skip header if present)
+    start_line = 0
+    # Check if first line looks like a header (contains column names)
+    first_line = lines[0].rstrip(';')
+    if 'Authors' in first_line and 'Title' in first_line and 'Year' in first_line:
+        start_line = 1
+    
+    rows = []
+    for line in lines[start_line:]:
         line = line.rstrip(';').strip()
         if not line:
             continue
-        # Fix the missing delimiter between fields: "" -> ","
-        line = line.replace('""', '","')
-        cleaned_lines.append(line)
-    
-    cleaned_content = '\n'.join(cleaned_lines)
-    
-    try:
-        df = pd.read_csv(io.StringIO(cleaned_content), dtype=str, keep_default_na=False, quotechar='"')
-    except Exception as e:
-        st.error(f"CSV parsing failed after cleaning: {e}")
-        return pd.DataFrame(columns=learned_structure['columns'])
-    
-    expected_cols = learned_structure['columns']
-    actual_cols = list(df.columns)
-    
-    # Align columns to the learned structure
-    if set(expected_cols).issubset(set(actual_cols)):
-        # Reorder and select only expected columns
-        df = df[expected_cols]
-    else:
-        # Fallback: align by position if column count matches
-        if len(actual_cols) == len(expected_cols):
-            df.columns = expected_cols
-        elif len(actual_cols) < len(expected_cols):
-            # Add missing columns as empty
-            for col in expected_cols[len(actual_cols):]:
-                df[col] = ''
-            df.columns = expected_cols
+        fields = extract_quoted_fields(line)
+        # Map to expected columns: take as many fields as we have columns
+        if len(fields) >= len(expected_cols):
+            row = fields[:len(expected_cols)]
         else:
-            # Truncate extra columns and rename
-            df = df.iloc[:, :len(expected_cols)]
-            df.columns = expected_cols
+            row = fields + [''] * (len(expected_cols) - len(fields))
+        rows.append(row)
     
-    # Ensure all columns are present (in case of mismatch)
-    for col in expected_cols:
-        if col not in df.columns:
-            df[col] = ''
+    if not rows:
+        return pd.DataFrame(columns=expected_cols)
     
-    return df[expected_cols]
+    df = pd.DataFrame(rows, columns=expected_cols)
+    return df
 
 
 # ─────────────────────────────────────────────────────────────────────────────
