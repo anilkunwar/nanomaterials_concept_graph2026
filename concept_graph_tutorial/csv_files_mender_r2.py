@@ -20,18 +20,13 @@ from typing import List, Dict, Optional, Tuple, Literal
 
 def learn_from_correct_format(content: str) -> Dict:
     """Parse correct format and extract structural information."""
-    # Parse with standard CSV
     df = pd.read_csv(io.StringIO(content), dtype=str, keep_default_na=False)
-    
-    # Learn column names and sample data patterns
     structure = {
         'columns': list(df.columns),
         'num_columns': len(df.columns),
         'sample_row': df.iloc[0].to_dict() if len(df) > 0 else {},
         'dtypes': {col: str(df[col].dtype) for col in df.columns},
     }
-    
-    # Learn patterns for key fields
     for col in ['Authors', 'Author full names', 'Author(s) ID', 'Title', 'Year', 'EID']:
         if col in df.columns and len(df) > 0:
             sample = str(df[col].iloc[0])
@@ -41,7 +36,6 @@ def learn_from_correct_format(content: str) -> Dict:
                 'has_quote': '"' in sample,
                 'length': len(sample),
             }
-    
     return structure
 
 
@@ -52,19 +46,14 @@ def learn_from_correct_format(content: str) -> Dict:
 def detect_format_type(content: str) -> Literal['correct', 'incorrect', 'unknown']:
     """Detect if file is correct or incorrect Scopus CSV format."""
     first_line = content.split('\n')[0] if content else ''
-    
-    # Incorrect format indicators
-    if first_line.endswith(';' * 10):          # trailing semicolons
+    if first_line.endswith(';' * 10):
         return 'incorrect'
-    if '""' in first_line and '","' not in first_line[:100]:  # missing comma between first fields
+    if '""' in first_line and '","' not in first_line[:100]:
         return 'incorrect'
     if first_line.startswith('"') and '"""' in first_line:
         return 'incorrect'
-    
-    # Correct format indicators
     if first_line.count('","') >= 20 and not first_line.endswith(';'):
         return 'correct'
-    
     return 'unknown'
 
 
@@ -78,17 +67,14 @@ def extract_quoted_fields(line: str) -> List[str]:
     n = len(line)
     while i < n:
         if line[i] == '"':
-            # start of a field
             field_chars = []
             i += 1
             while i < n:
                 if line[i] == '"':
-                    # check if next is also quote (escaped)
                     if i + 1 < n and line[i+1] == '"':
                         field_chars.append('"')
-                        i += 2  # skip both quotes
+                        i += 2
                     else:
-                        # end of field
                         i += 1
                         break
                 else:
@@ -100,10 +86,19 @@ def extract_quoted_fields(line: str) -> List[str]:
     return fields
 
 
+def count_author_tokens(authors_str: str) -> int:
+    """Count the number of authors by splitting on semicolon."""
+    if not authors_str:
+        return 0
+    # Split on semicolon, but ignore trailing semicolons
+    parts = [p.strip() for p in authors_str.split(';') if p.strip()]
+    return len(parts)
+
+
 def parse_incorrect_format(content: str, learned_structure: Dict) -> pd.DataFrame:
     """
-    Parse incorrect Scopus CSV by extracting quoted fields from each row.
-    Ignores all separators (commas, semicolons) between fields.
+    Parse incorrect Scopus CSV by extracting quoted fields and regrouping
+    the split multi‑value fields (Authors, Author full names, Author(s) ID).
     """
     lines = content.strip().split('\n')
     if not lines:
@@ -111,9 +106,8 @@ def parse_incorrect_format(content: str, learned_structure: Dict) -> pd.DataFram
     
     expected_cols = learned_structure['columns']
     
-    # Find the first data row (skip header if present)
+    # Find first data row (skip header if present)
     start_line = 0
-    # Check if first line looks like a header (contains column names)
     first_line = lines[0].rstrip(';')
     if 'Authors' in first_line and 'Title' in first_line and 'Year' in first_line:
         start_line = 1
@@ -123,13 +117,57 @@ def parse_incorrect_format(content: str, learned_structure: Dict) -> pd.DataFram
         line = line.rstrip(';').strip()
         if not line:
             continue
+        
+        # Extract all quoted strings
         fields = extract_quoted_fields(line)
-        # Map to expected columns: take as many fields as we have columns
-        if len(fields) >= len(expected_cols):
-            row = fields[:len(expected_cols)]
-        else:
-            row = fields + [''] * (len(expected_cols) - len(fields))
-        rows.append(row)
+        if not fields:
+            continue
+        
+        # ---- Regroup fields ----
+        # First field is always Authors
+        authors_str = fields[0].strip()
+        n_authors = count_author_tokens(authors_str)
+        
+        # If n_authors == 0, treat as single author? fallback
+        if n_authors == 0:
+            n_authors = 1  # maybe only one author without semicolon
+        
+        # Next n_authors fields are Author full names
+        full_names = []
+        id_list = []
+        idx = 1
+        for _ in range(n_authors):
+            if idx < len(fields):
+                full_names.append(fields[idx].strip())
+                idx += 1
+            else:
+                full_names.append('')
+        # Next n_authors fields are Author(s) ID
+        for _ in range(n_authors):
+            if idx < len(fields):
+                id_list.append(fields[idx].strip())
+                idx += 1
+            else:
+                id_list.append('')
+        
+        # Join them with semicolons
+        author_full_names = '; '.join(full_names)
+        author_ids = '; '.join(id_list)
+        
+        # The remaining fields (from idx onwards) are the other columns
+        remaining = fields[idx:]
+        
+        # Build the complete row: [Authors, author_full_names, author_ids] + remaining
+        row_data = [authors_str, author_full_names, author_ids] + remaining
+        
+        # If we have more fields than expected columns, truncate
+        if len(row_data) > len(expected_cols):
+            row_data = row_data[:len(expected_cols)]
+        # If fewer, pad with empty strings
+        elif len(row_data) < len(expected_cols):
+            row_data += [''] * (len(expected_cols) - len(row_data))
+        
+        rows.append(row_data)
     
     if not rows:
         return pd.DataFrame(columns=expected_cols)
@@ -163,32 +201,26 @@ def main():
     2. **Convert**: Upload incorrectly-formatted files (Category A/C) to convert them
     """)
     
-    # Initialize session state
     if 'learned_structure' not in st.session_state:
         st.session_state.learned_structure = None
     
-    # ── Phase 1: Learn ──────────────────────────────────────────────────────
+    # Phase 1: Learn
     st.header("Phase 1: Learn Correct Format")
-    
     correct_file = st.file_uploader(
         "Upload a CORRECTLY formatted Scopus CSV (Category B)",
         type=['csv'],
         key='correct_uploader'
     )
-    
     if correct_file:
         content = correct_file.read().decode('utf-8-sig')
         fmt = detect_format_type(content)
-        
         if fmt == 'incorrect':
             st.error("❌ This file appears to be in INCORRECT format. Please upload a correct one.")
         else:
             try:
                 structure = learn_from_correct_format(content)
                 st.session_state.learned_structure = structure
-                
                 st.success(f"✅ Learned structure: **{structure['num_columns']} columns**")
-                
                 with st.expander("View learned structure"):
                     st.json({
                         'columns': structure['columns'],
@@ -198,9 +230,8 @@ def main():
             except Exception as e:
                 st.error(f"❌ Failed to learn: {e}")
     
-    # ── Phase 2: Convert ────────────────────────────────────────────────────
+    # Phase 2: Convert
     st.header("Phase 2: Convert Incorrect Format")
-    
     if st.session_state.learned_structure is None:
         st.info("⬆️ Please upload a correct format file first to enable conversion.")
         return
@@ -211,7 +242,6 @@ def main():
         accept_multiple_files=True,
         key='incorrect_uploader'
     )
-    
     if not incorrect_files:
         st.info("⬆️ Upload incorrect format files to convert")
         return
@@ -219,37 +249,27 @@ def main():
     for uploaded_file in incorrect_files:
         st.divider()
         st.subheader(f"📄 {uploaded_file.name}")
-        
         content = uploaded_file.read().decode('utf-8-sig')
         fmt = detect_format_type(content)
-        
         if fmt == 'correct':
             st.warning("⚠️ This file appears to already be in correct format. Skipping conversion.")
             continue
-        
         if fmt == 'unknown':
             st.warning("⚠️ Could not detect format. Attempting conversion anyway.")
-        
         st.info("🔍 Detected: **Incorrect format** — converting...")
         
         try:
             with st.spinner("Converting..."):
                 df = parse_incorrect_format(content, st.session_state.learned_structure)
-            
             if df.empty:
                 st.warning("⚠️ Conversion produced no rows. The file may be empty or unparseable.")
                 continue
-            
             st.success(f"✅ Converted: **{len(df)} rows** × **{len(df.columns)} columns**")
-            
             with st.expander("Preview"):
                 st.dataframe(df.head(3), use_container_width=True)
             
-            # Download buttons
             col1, col2 = st.columns(2)
-            
             base_name = Path(uploaded_file.name).stem
-            
             with col1:
                 csv_output = format_as_correct_csv(df)
                 st.download_button(
@@ -259,7 +279,6 @@ def main():
                     mime="text/csv",
                     use_container_width=True
                 )
-            
             with col2:
                 json_output = df.to_json(orient='records', indent=2, force_ascii=False)
                 st.download_button(
@@ -269,7 +288,6 @@ def main():
                     mime="application/json",
                     use_container_width=True
                 )
-                
         except Exception as e:
             st.error(f"❌ Conversion failed: {e}")
             st.exception(e)
