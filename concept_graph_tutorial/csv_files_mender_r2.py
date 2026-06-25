@@ -10,50 +10,8 @@ import pandas as pd
 import csv
 import io
 from pathlib import Path
-from typing import List, Dict, Literal
+from typing import List, Dict, Optional, Tuple, Literal
 
-# ─────────────────────────────────────────────────────────────────────────────
-# PREPROCESSING: FIX MALFORMED CSV
-# ─────────────────────────────────────────────────────────────────────────────
-
-def preprocess_malformed_csv(content: str) -> str:
-    """
-    Safely detects and fixes CSV files where each entire row is wrapped in an extra 
-    layer of double quotes, with optional trailing semicolons.
-    """
-    if not content.strip():
-        return content
-
-    # Quick check on the first line to avoid unnecessary processing of normal files
-    first_line = content.split('\n')[0].strip()
-    try:
-        reader = csv.reader(io.StringIO(first_line))
-        first_row = next(reader)
-        # If the first line parses as a single field but contains commas, 
-        # it's the malformed format (entire line wrapped in quotes).
-        if not (len(first_row) == 1 and ',' in first_row[0]):
-            return content 
-    except Exception:
-        return content
-
-    # Parse the whole content safely using csv.reader
-    # This naturally handles multiline fields (like long abstracts) and escaped quotes
-    reader = csv.reader(io.StringIO(content))
-    fixed_lines = []
-    
-    for row in reader:
-        if not row:
-            fixed_lines.append("")
-            continue
-            
-        inner_str = row[0]
-        
-        # Strip trailing semicolons that were appended outside the inner quotes
-        inner_str = inner_str.rstrip(';')
-        
-        fixed_lines.append(inner_str)
-        
-    return '\n'.join(fixed_lines)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PHASE 1: LEARN FROM CORRECT FORMAT
@@ -67,76 +25,67 @@ def learn_from_correct_format(content: str) -> Dict:
         'columns': list(df.columns),
         'num_columns': len(df.columns),
         'sample_row': df.iloc[0].to_dict() if len(df) > 0 else {},
-        'dtypes': {col: str(df[col].dtype) for col in df.columns},
     }
     
-    for col in ['Authors', 'Author full names', 'Author(s) ID', 'Title', 'Year', 'EID']:
-        if col in df.columns and len(df) > 0:
-            sample = str(df[col].iloc[0])
-            structure[f'{col}_pattern'] = {
-                'has_semicolon': ';' in sample,
-                'has_comma': ',' in sample,
-                'has_quote': '"' in sample,
-                'length': len(sample),
-            }
-            
     return structure
 
+
 # ─────────────────────────────────────────────────────────────────────────────
-# PHASE 2: DETECT AND PARSE INCORRECT FORMAT
+# PHASE 2: DETECT AND FIX INCORRECT FORMAT
 # ─────────────────────────────────────────────────────────────────────────────
 
 def detect_format_type(content: str) -> Literal['correct', 'incorrect', 'unknown']:
     """Detect if file is correct or incorrect Scopus CSV format."""
-    if not content.strip():
-        return 'unknown'
-        
-    first_line = content.split('\n')[0].strip()
+    first_line = content.split('\n')[0] if content else ''
     
-    try:
-        reader = csv.reader(io.StringIO(first_line))
-        first_row = next(reader)
-        # Incorrect format: entire line is wrapped in quotes, parsing as 1 field with commas
-        if len(first_row) == 1 and ',' in first_row[0]:
-            return 'incorrect'
-    except Exception:
-        pass
-        
+    # Incorrect format indicators (strong)
+    if first_line.endswith(';' * 50):  # Trailing semicolons
+        return 'incorrect'
+    if first_line.count('""') > 20:  # Doubled quotes
+        return 'incorrect'
+    
     # Correct format indicators
-    if first_line.count('","') >= 5 and not first_line.rstrip().endswith(';'):
+    if first_line.count('","') >= 20 and not first_line.endswith(';'):
         return 'correct'
     
     return 'unknown'
 
-def parse_incorrect_format(content: str, learned_structure: Dict) -> pd.DataFrame:
+
+def fix_incorrect_scopus_csv(content: str) -> str:
     """
-    Parse incorrect Scopus CSV format by transforming it to correct format.
+    Fixes the specific 'incorrect' Scopus CSV format by transforming it 
+    back into a standard correct CSV format.
+    
+    The incorrect format has these characteristics:
+    - The delimiter ',' is replaced by ,""
+    - The last field has an extra " at the end
+    - There are trailing semicolons
+    
+    This function reverses those changes so Pandas can parse it normally.
     """
-    # Step 1: Clean the malformed CSV string
-    cleaned_content = preprocess_malformed_csv(content)
+    lines = content.splitlines()
+    fixed_lines = []
     
-    # Step 2: Parse the cleaned content using pandas
-    try:
-        df = pd.read_csv(io.StringIO(cleaned_content), dtype=str, keep_default_na=False)
-    except Exception as e:
-        st.error(f"Failed to parse cleaned CSV: {e}")
-        return pd.DataFrame(columns=learned_structure['columns'])
-    
-    # Step 3: Align with learned structure
-    expected_cols = learned_structure['columns']
-    
-    # Add missing columns as empty strings
-    for col in expected_cols:
-        if col not in df.columns:
-            df[col] = ''
+    for line in lines:
+        line = line.strip()
+        if not line:
+            fixed_lines.append("")
+            continue
+        
+        # 1. Remove trailing semicolons
+        line = line.rstrip(';')
+        
+        # 2. If the line ends with "", remove the last "
+        if line.endswith('""'):
+            line = line[:-1]
             
-    # Keep only the expected columns in the correct order
-    df = df[[col for col in expected_cols if col in df.columns]]
-    
-    # Reorder to exactly match learned structure
-    df = df[expected_cols]
-    
-    return df
+        # 3. Replace the incorrect delimiter ,"" with the correct delimiter ","
+        line = line.replace(',""', '","')
+        
+        fixed_lines.append(line)
+        
+    return '\n'.join(fixed_lines)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # OUTPUT FORMATTING
@@ -147,6 +96,7 @@ def format_as_correct_csv(df: pd.DataFrame) -> str:
     output = io.StringIO()
     df.to_csv(output, index=False, quoting=csv.QUOTE_ALL, encoding='utf-8')
     return output.getvalue()
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STREAMLIT UI
@@ -176,12 +126,7 @@ def main():
     )
     
     if correct_file:
-        # Handle potential encoding issues gracefully
-        try:
-            content = correct_file.read().decode('utf-8-sig')
-        except UnicodeDecodeError:
-            content = correct_file.read().decode('latin-1')
-            
+        content = correct_file.read().decode('utf-8-sig')
         fmt = detect_format_type(content)
         
         if fmt == 'incorrect':
@@ -196,8 +141,7 @@ def main():
                 with st.expander("View learned structure"):
                     st.json({
                         'columns': structure['columns'],
-                        'num_columns': structure['num_columns'],
-                        'sample_patterns': {k: v for k, v in structure.items() if '_pattern' in k}
+                        'num_columns': structure['num_columns']
                     })
             except Exception as e:
                 st.error(f"❌ Failed to learn: {e}")
@@ -224,11 +168,7 @@ def main():
         st.divider()
         st.subheader(f"📄 {uploaded_file.name}")
         
-        try:
-            content = uploaded_file.read().decode('utf-8-sig')
-        except UnicodeDecodeError:
-            content = uploaded_file.read().decode('latin-1')
-            
+        content = uploaded_file.read().decode('utf-8-sig')
         fmt = detect_format_type(content)
         
         if fmt == 'correct':
@@ -236,18 +176,38 @@ def main():
             continue
         
         if fmt == 'unknown':
-            st.warning("⚠️ Could not definitively detect format. Attempting conversion anyway.")
+            st.warning("⚠️ Could not detect format. Attempting conversion anyway.")
         
         st.info("🔍 Detected: **Incorrect format** — converting...")
         
         try:
             with st.spinner("Converting..."):
-                df = parse_incorrect_format(content, st.session_state.learned_structure)
+                # FIX THE FORMAT FIRST
+                fixed_content = fix_incorrect_scopus_csv(content)
+                
+                # NOW PARSE AS NORMAL CSV
+                df = pd.read_csv(io.StringIO(fixed_content), dtype=str, keep_default_na=False)
+                
+                # Verify columns match learned structure
+                expected_cols = st.session_state.learned_structure['columns']
+                missing_cols = [c for c in expected_cols if c not in df.columns]
+                extra_cols = [c for c in df.columns if c not in expected_cols]
+                
+                if missing_cols:
+                    st.warning(f"⚠️ Missing columns compared to learned structure: {missing_cols}")
+                if extra_cols:
+                    st.warning(f"⚠️ Extra columns not in learned structure: {extra_cols}")
+                    
+                # Reorder columns to match learned structure
+                df = df[[c for c in expected_cols if c in df.columns]]
+                
+                # Add any missing columns as empty
+                for col in missing_cols:
+                    df[col] = ''
+                    
+                # Final reorder to exactly match learned structure
+                df = df[expected_cols]
             
-            if df.empty:
-                st.warning("⚠️ Conversion resulted in an empty DataFrame. Check file contents.")
-                continue
-
             st.success(f"✅ Converted: **{len(df)} rows** × **{len(df.columns)} columns**")
             
             with st.expander("Preview"):
@@ -281,6 +241,7 @@ def main():
         except Exception as e:
             st.error(f"❌ Conversion failed: {e}")
             st.exception(e)
+
 
 if __name__ == "__main__":
     main()
