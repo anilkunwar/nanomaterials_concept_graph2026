@@ -4,7 +4,7 @@
 
 [![integratedllmgraphnanomaterials](https://img.shields.io/badge/csvmender-v1-green)](https://csv-files-mender1.streamlit.app/ )  (not working, learns the correct format and then converts the malformed files into the format of the correct file)
 
-[![integratedllmgraphnanomaterials](https://img.shields.io/badge/csvmender-v2-green)](https://csv-files-mender2.streamlit.app/ ) (working app, learns the static format, and ensures that the uploaded documents follows this standard template, provides the visualization of the datasets)
+[![integratedllmgraphnanomaterials](https://img.shields.io/badge/csvmender-v2-green)](https://csv-files-mender2.streamlit.app/ ) (working app, learns the static format, and ensures that the uploaded documents follows this standard template, provides the visualization of the datasets, Scopus CSV Repair & Explorer)
 
 # CSV to JSON conversion (not working)
 
