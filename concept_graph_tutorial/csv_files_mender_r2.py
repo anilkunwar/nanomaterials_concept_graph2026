@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""
+'''
 Scopus CSV Format Learner & Converter — Bulletproof Edition v5
 ===============================================================
 
@@ -24,7 +24,7 @@ Instead of fragile string replacement, we use a state-machine parser that:
 - Reconstructs a valid standard CSV using Python's csv module
 
 This preserves Abstracts, Titles, and all fields with commas/quotes intact.
-"""
+'''
 
 import streamlit as st
 import pandas as pd
