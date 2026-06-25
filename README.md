@@ -20,4 +20,8 @@
 
 # Nanomaterials concept graph construction (working)
 
-[![integratedllmgraphnanomaterials](https://img.shields.io/badge/nanocg-v1-blue)](https://nanomaterials-concept-graph1.streamlit.app/)
+[![integratedllmgraphnanomaterials](https://img.shields.io/badge/nanocg-v1-red)](https://nanomaterials-concept-graph1.streamlit.app/) (the Barnes-Hut physics simulation has very low damping (0.09) and no stabilization phase and  the nodes never stop jiggling) 
+
+[![integratedllmgraphnanomaterials](https://img.shields.io/badge/nanocg-v2-red)](https://nanomaterials-concept-graph2.streamlit.app/) (Stable and deterministic layout of graph with Kamada-Kawai (or spring layout for >300 nodes) before passing coordinates to PyVis; Performed the following FIX over V1 -Pre-compute a deterministic layout with NetworkX and either (1) disable physics entirely, or (2) run a long stabilization phase with much higher damping before displaying.)
+
+[![integratedllmgraphnanomaterials](https://img.shields.io/badge/nanocg-v3-red)](https://nanomaterials-concept-graph3.streamlit.app/) (More postprocessing on V2, Stable and deterministic layout of graph with Kamada-Kawai (or spring layout for >300 nodes) before passing coordinates to PyVis; Performed the following FIX over V1 -Pre-compute a deterministic layout with NetworkX and either (1) disable physics entirely, or (2) run a long stabilization phase with much higher damping before displaying.)
