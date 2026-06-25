@@ -74,7 +74,7 @@ def detect_format_type(content: str) -> Literal['correct', 'incorrect', 'unknown
 
 
 def fix_incorrect_scopus_csv(content: str) -> str:
-    """
+    '''
     Bulletproof fix for corrupted Scopus CSV format.
 
     Uses state-machine parsing to handle the specific corruption where:
@@ -82,7 +82,7 @@ def fix_incorrect_scopus_csv(content: str) -> str:
     - Internal quotes are doubled
     - First field is unquoted
     - Remaining fields are wrapped in ""
-    """
+    '''
     lines = content.splitlines()
     if not lines:
         return ""
@@ -114,7 +114,7 @@ def fix_incorrect_scopus_csv(content: str) -> str:
 
 
 def _parse_corrupted_line(line: str) -> List[str]:
-    """
+    '''
     State-machine parser for a single corrupted Scopus CSV line.
 
     CORRUPTED FORMAT:
@@ -126,7 +126,7 @@ def _parse_corrupted_line(line: str) -> List[str]:
     - ,"" = delimiter between fields
     - field2..N = text wrapped in ""...""
     - """ at end = "" (field close) + " (outer wrapper close)
-    """
+    '''
     fields = []
     current_field = []
     state = 'FIRST_FIELD'  # FIRST_FIELD, IN_QUOTED_FIELD
