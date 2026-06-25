@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 '''
-Scopus CSV Format Learner & Converter — Bulletproof Edition v5
+Scopus CSV Format Learner & Converter — Bulletproof Edition v6
 ===============================================================
 
 THE CORRUPTION PATTERN (observed in Scopus Category A CSV exports):
@@ -12,27 +12,23 @@ Incorrect (Category A): "Authors,""Author full names"",""Title"",...,""EID""";;;
 The corruption is:
 1. Entire row wrapped in extra outer quotes: "...content..."
 2. All internal quotes doubled: " -> ""
-3. First field (Authors) is UNQUOTED raw text
+3. First field (Authors) is UNQUOTED raw text (ends with comma)
 4. Fields 2-N are wrapped in ""..."" instead of "..."
 5. Trailing semicolons added as padding
 
 THE FIX:
-Instead of fragile string replacement, we use a state-machine parser that:
-- Strips outer wrapper and trailing semicolons
-- Extracts the unquoted first field character-by-character
-- Parses remaining fields as quoted CSV with "" as quotechar
-- Reconstructs a valid standard CSV using Python's csv module
-
-This preserves Abstracts, Titles, and all fields with commas/quotes intact.
+1. Strip trailing semicolons
+2. Strip outer wrapper quotes (first and last char)
+3. Replace all "" with " (undo quote doubling)
+4. Result is valid standard CSV with comma delimiter
 '''
 
 import streamlit as st
 import pandas as pd
 import csv
 import io
-import re
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple, Literal
+from typing import List, Dict, Literal
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -42,14 +38,11 @@ from typing import List, Dict, Optional, Tuple, Literal
 def learn_from_correct_format(content: str) -> Dict:
     """Parse correct format and extract structural information."""
     df = pd.read_csv(io.StringIO(content), dtype=str, keep_default_na=False)
-
-    structure = {
+    return {
         'columns': list(df.columns),
         'num_columns': len(df.columns),
         'sample_row': df.iloc[0].to_dict() if len(df) > 0 else {},
     }
-
-    return structure
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -75,13 +68,10 @@ def detect_format_type(content: str) -> Literal['correct', 'incorrect', 'unknown
 
 def fix_incorrect_scopus_csv(content: str) -> str:
     '''
-    Bulletproof fix for corrupted Scopus CSV format.
-
-    Uses state-machine parsing to handle the specific corruption where:
-    - Row is wrapped in extra outer quotes
-    - Internal quotes are doubled
-    - First field is unquoted
-    - Remaining fields are wrapped in ""
+    Fix corrupted Scopus CSV by reversing the corruption pattern.
+    
+    Corruption: "Authors,""field2"",""field3"",...,""fieldN""";;;;;;;;;;
+    Fix:       Authors,"field2","field3",...,"fieldN"
     '''
     lines = content.splitlines()
     if not lines:
@@ -90,8 +80,8 @@ def fix_incorrect_scopus_csv(content: str) -> str:
     fixed_lines = []
 
     for line in lines:
-        line = line.strip()
-        if not line:
+        line = line.rstrip('\n\r')
+        if not line.strip():
             fixed_lines.append("")
             continue
 
@@ -101,104 +91,18 @@ def fix_incorrect_scopus_csv(content: str) -> str:
             fixed_lines.append("")
             continue
 
-        # Step 2: Parse with state machine
-        fields = _parse_corrupted_line(line)
+        # Step 2: Strip outer wrapper quotes if present
+        # The line starts with " and ends with " (before semicolons were stripped)
+        if len(line) >= 2 and line[0] == '"' and line[-1] == '"':
+            line = line[1:-1]
 
-        # Step 3: Write as properly formatted CSV
-        output = io.StringIO()
-        writer = csv.writer(output, quoting=csv.QUOTE_ALL, lineterminator='')
-        writer.writerow(fields)
-        fixed_lines.append(output.getvalue())
+        # Step 3: Undo quote doubling — replace all "" with "
+        # This converts ""field"" to "field", giving valid CSV
+        line = line.replace('""', '"')
+
+        fixed_lines.append(line)
 
     return '\n'.join(fixed_lines)
-
-
-def _parse_corrupted_line(line: str) -> List[str]:
-    '''
-    State-machine parser for a single corrupted Scopus CSV line.
-
-    CORRUPTED FORMAT:
-    "field1,""field2"",""field3"",...,""fieldN"""
-
-    Where:
-    - " at position 0 = outer wrapper start
-    - field1 = unquoted text until first ,"" delimiter
-    - ,"" = delimiter between fields
-    - field2..N = text wrapped in ""...""
-    - """ at end = "" (field close) + " (outer wrapper close)
-    '''
-    fields = []
-    current_field = []
-    state = 'FIRST_FIELD'  # FIRST_FIELD, IN_QUOTED_FIELD
-
-    i = 0
-    while i < len(line):
-        char = line[i]
-        next_char = line[i + 1] if i + 1 < len(line) else None
-        next_next_char = line[i + 2] if i + 2 < len(line) else None
-
-        if state == 'FIRST_FIELD':
-            # First field is unquoted raw text until we hit ,"" delimiter
-            if char == ',' and next_char == '"' and next_next_char == '"':
-                # Found delimiter ,"" - end of first field
-                fields.append(''.join(current_field))
-                current_field = []
-                state = 'IN_QUOTED_FIELD'
-                i += 3  # Skip past ,""
-            elif i == 0 and char == '"':
-                # Opening outer wrapper quote - skip it
-                i += 1
-            else:
-                current_field.append(char)
-                i += 1
-
-        elif state == 'IN_QUOTED_FIELD':
-            # Inside a quoted field (wrapped in "")
-            if char == '"' and next_char == '"':
-                # Two consecutive quotes - check what comes after
-                # Look ahead to determine if this is:
-                # a) Escaped quote inside field: "" followed by non-quote
-                # b) End of field: """ followed by ,"" or end
-                # c) End of line: """ at very end
-
-                if i + 2 < len(line):
-                    char_after = line[i + 2]
-                    if char_after == '"':
-                        # """ pattern - this is end of field + start of next or end
-                        # Check if followed by ,"" (next field) or just end
-                        if i + 3 < len(line) and line[i + 3] == ',':
-                            # ""","" pattern - end of field, delimiter starts
-                            fields.append(''.join(current_field))
-                            current_field = []
-                            # Skip past """ , then the ,"" will be handled
-                            i += 3  # Now at ','
-                        elif i + 3 >= len(line):
-                            # """ at end of line - end of last field + outer wrapper close
-                            fields.append(''.join(current_field))
-                            current_field = []
-                            i += 3
-                        else:
-                            # """ followed by something else - treat as escaped quote
-                            current_field.append('"')
-                            i += 2
-                    else:
-                        # "" followed by non-quote - this is escaped quote inside field
-                        current_field.append('"')
-                        i += 2
-                else:
-                    # "" at end of line - end of field
-                    fields.append(''.join(current_field))
-                    current_field = []
-                    i += 2
-            else:
-                current_field.append(char)
-                i += 1
-
-    # Handle any remaining content
-    if current_field:
-        fields.append(''.join(current_field))
-
-    return fields
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -220,19 +124,16 @@ def main():
     st.set_page_config(page_title="Scopus CSV Format Learner", page_icon="🎓", layout="wide")
 
     st.title("🎓 Scopus CSV Format Learner & Converter")
-    st.markdown("""
+    st.markdown('''
     **Two-phase workflow:**
     1. **Learn**: Upload a correctly-formatted Scopus CSV (Category B)
     2. **Convert**: Upload incorrectly-formatted files (Category A/C) to convert them
 
-    **Robust state-machine parser handles:**
-    - Outer quote wrapper on entire rows
-    - Doubled internal quotes ("" -> ")
-    - Corrupted delimiter (,"" instead of ",")
-    - Trailing semicolon spam
-    - Unquoted first column (Authors) with commas
-    - Abstracts with commas and quotes preserved intact
-    """)
+    **Fix method:**
+    - Strip outer quote wrapper and trailing semicolons
+    - Replace doubled quotes "" with standard quotes "
+    - Result is valid standard CSV with comma delimiter
+    ''')
 
     # Initialize session state
     if 'learned_structure' not in st.session_state:
@@ -300,18 +201,17 @@ def main():
         if fmt == 'unknown':
             st.warning("⚠️ Could not detect format. Attempting conversion anyway.")
 
-        st.info("🔍 Detected: **Incorrect format** — converting with state-machine parser...")
+        st.info("🔍 Detected: **Incorrect format** — converting...")
 
         try:
             with st.spinner("Converting..."):
-                # FIX THE FORMAT using state machine parser
                 fixed_content = fix_incorrect_scopus_csv(content)
 
-                # Debug: show first 500 chars of fixed content
+                # Debug: show first 1000 chars of fixed content
                 with st.expander("Debug: Fixed content preview"):
                     st.code(fixed_content[:1000], language="text")
 
-                # NOW PARSE AS NORMAL CSV
+                # Parse as normal CSV
                 df = pd.read_csv(io.StringIO(fixed_content), dtype=str, keep_default_na=False)
 
                 # Verify columns match learned structure
@@ -341,7 +241,6 @@ def main():
 
             # Download buttons
             col1, col2 = st.columns(2)
-
             base_name = Path(uploaded_file.name).stem
 
             with col1:
