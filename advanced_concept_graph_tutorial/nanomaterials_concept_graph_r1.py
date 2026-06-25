@@ -114,11 +114,21 @@ SUPPORTED_COLORMAPS = {
 def get_colormap_colors(cmap_name: str, n: int) -> List[str]:
     """Convert matplotlib colormap to list of hex colors for Plotly/PyVis"""
     try:
-        cmap = cm.get_cmap(cmap_name, n)
+        # Matplotlib >= 3.6 API
+        cmap = matplotlib.colormaps.get_cmap(cmap_name).resampled(n)
         return [matplotlib.colors.to_hex(cmap(i)) for i in range(n)]
     except Exception:
-        cmap = cm.get_cmap("viridis", n)
-        return [matplotlib.colors.to_hex(cmap(i)) for i in range(n)]
+        try:
+            # Fallback for Matplotlib < 3.6
+            cmap = cm.get_cmap(cmap_name, n)
+            return [matplotlib.colors.to_hex(cmap(i)) for i in range(n)]
+        except Exception:
+            # Final fallback to viridis
+            try:
+                cmap = matplotlib.colormaps.get_cmap("viridis").resampled(n)
+            except Exception:
+                cmap = cm.get_cmap("viridis", n)
+            return [matplotlib.colors.to_hex(cmap(i)) for i in range(n)]
 
 # ==========================================
 # ROBUST JSON LOADER
