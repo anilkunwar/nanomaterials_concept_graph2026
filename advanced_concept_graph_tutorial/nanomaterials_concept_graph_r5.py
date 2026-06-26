@@ -1,3 +1,11 @@
+        fig.update_layout(
+            title="<b>Nanomaterials Research Domain Hierarchy</b><br><i>Size = concept frequency</i>",
+            font=dict(size=label_size, family="Arial", color=theme["font"] if theme else "#000000"),
+            paper_bgcolor=theme["plotly_paper"] if theme else "#ffffff",
+            plot_bgcolor=theme["bg"] if theme else "#ffffff",
+            width=width, height=height,
+            margin=dict(t=60, b=20, l=20, r=20)
+        )
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
@@ -1008,18 +1016,22 @@ def get_nanomaterials_category_color(concept: str, cmap_colors: Optional[List[st
 
 def render_graph_pyvis(nx_graph, concept_abstract_map, physics_enabled=True,
                         min_node_size=8, max_node_size=40, cmap_name="viridis",
-                        custom_labels=None, node_label_size=12, top_n_nodes=0):
+                        custom_labels=None, node_label_size=12, top_n_nodes=0,
+                        theme=None, physics_preset=None):
     if top_n_nodes > 0 and len(nx_graph.nodes()) > top_n_nodes:
         degrees = dict(nx_graph.degree(weight='weight'))
         top_nodes = sorted(degrees.keys(), key=lambda x: degrees[x], reverse=True)[:top_n_nodes]
         nx_graph = nx_graph.subgraph(top_nodes).copy()
 
-    # ─── STABLE LAYOUT: Pre-compute deterministic positions with NetworkX ───
-    # This eliminates the "dancing" by giving physics a stable starting point (or replacing it entirely)
+    if theme is None:
+        theme = THEME_PRESETS["Bright (Default)"]
+    if physics_preset is None:
+        physics_preset = PHYSICS_PRESETS["Stable (Default)"]
+
+    # Pre-compute deterministic layout
     pos = {}
     if len(nx_graph.nodes()) > 0:
         try:
-            # Kamada-Kawai produces very aesthetic, stable layouts for concept graphs
             if len(nx_graph.nodes()) < 300:
                 pos = nx.kamada_kawai_layout(nx_graph, weight='weight')
             else:
@@ -1027,43 +1039,43 @@ def render_graph_pyvis(nx_graph, concept_abstract_map, physics_enabled=True,
         except Exception:
             pos = nx.spring_layout(nx_graph, k=2.5, iterations=200, seed=42, weight='weight')
 
-    cmap_colors = get_colormap_colors(cmap_name, len(nx_graph.nodes()))
+    cmap_colors = get_colormap_colors(cmap_name, max(1, len(nx_graph.nodes())))
 
-    # ─── DARK, PROFESSIONAL THEME ───
-    net = Network(height="780px", width="100%", bgcolor="#0f172a", font_color="#e2e8f0",
-                  select_menu=True, notebook=False, cdn_resources='remote')
+    net = Network(
+        height="780px", width="100%", bgcolor=theme['bg'], font_color=theme['font'],
+        select_menu=True, notebook=False, cdn_resources='remote'
+    )
 
-    # Physics options tuned for stability (high damping, moderate gravity, long stabilization)
-    if physics_enabled:
-        net.set_options("""
-        var options = {
-          "physics": {
+    if physics_enabled and physics_preset.get("gravity", 0) != 0:
+        net.set_options(f"""
+        var options = {{
+          "physics": {{
             "enabled": true,
             "solver": "barnesHut",
-            "barnesHut": {
-              "gravitationalConstant": -2500,
-              "centralGravity": 0.25,
-              "springLength": 140,
-              "springConstant": 0.015,
-              "damping": 0.55,
+            "barnesHut": {{
+              "gravitationalConstant": {physics_preset['gravity']},
+              "centralGravity": {physics_preset['central_gravity']},
+              "springLength": {physics_preset['spring_length']},
+              "springConstant": {physics_preset['spring_strength']},
+              "damping": {physics_preset['damping']},
               "overlap": 0.15
-            },
-            "stabilization": {
+            }},
+            "stabilization": {{
               "enabled": true,
-              "iterations": 2500,
+              "iterations": {physics_preset['stabilization']},
               "updateInterval": 30,
               "onlyDynamicEdges": false,
               "fit": true
-            }
-          },
-          "interaction": {
+            }}
+          }},
+          "interaction": {{
             "hover": true,
             "tooltipDelay": 180,
             "hideEdgesOnDrag": false,
             "zoomView": true,
             "dragView": true
-          }
-        }
+          }}
+        }}
         """)
     else:
         net.set_options("""
@@ -1073,7 +1085,6 @@ def render_graph_pyvis(nx_graph, concept_abstract_map, physics_enabled=True,
         }
         """)
 
-    # ─── NODES WITH AESTHETIC STYLING ───
     for i, node in enumerate(nx_graph.nodes()):
         freq = len(concept_abstract_map.get(node, []))
         size = int(np.clip(min_node_size + freq * 1.2, min_node_size, max_node_size))
@@ -1081,7 +1092,6 @@ def render_graph_pyvis(nx_graph, concept_abstract_map, physics_enabled=True,
         degree = int(nx_graph.degree(node))
         label = custom_labels.get(node, node) if custom_labels else node
 
-        # Scale pre-computed positions for PyVis canvas (roughly -1000 to 1000 range works well)
         x, y = (pos.get(node, (0, 0))[0] * 1200, pos.get(node, (0, 0))[1] * 1200)
 
         net.add_node(
@@ -1092,12 +1102,12 @@ def render_graph_pyvis(nx_graph, concept_abstract_map, physics_enabled=True,
             y=y,
             color={
                 'background': color,
-                'border': '#f8fafc',
-                'highlight': {'background': '#ff6b6b', 'border': '#ffffff'},
-                'hover': {'background': '#ffd93d', 'border': '#ffffff'}
+                'border': theme['node_border'],
+                'highlight': {'background': theme['highlight_bg'], 'border': '#ffffff'},
+                'hover': {'background': theme['hover_bg'], 'border': '#ffffff'}
             },
             font={
-                'color': '#e2e8f0',
+                'color': theme['font'],
                 'size': node_label_size,
                 'face': 'Inter, Segoe UI, Roboto, sans-serif',
                 'strokeWidth': 0,
@@ -1105,16 +1115,16 @@ def render_graph_pyvis(nx_graph, concept_abstract_map, physics_enabled=True,
             },
             title=(
                 f"<div style='font-family:Inter,sans-serif;'>"
-                f"<b style='font-size:14px;color:#38bdf8;'>{node}</b><br>"
-                f"<span style='color:#94a3b8;'>Degree:</span> {degree}<br>"
-                f"<span style='color:#94a3b8;'>Frequency:</span> {freq}"
+                f"<b style='font-size:14px;color:{theme['highlight_bg']};'>{node}</b><br>"
+                f"<span style='color:{theme['tooltip_text']};opacity:0.7;'>Degree:</span> {degree}<br>"
+                f"<span style='color:{theme['tooltip_text']};opacity:0.7;'>Frequency:</span> {freq}"
                 f"</div>"
             ),
             borderWidth=2,
             borderWidthSelected=3,
             shadow={
                 'enabled': True,
-                'color': 'rgba(0,0,0,0.6)',
+                'color': theme['shadow_color'],
                 'size': 12,
                 'x': 4,
                 'y': 4
@@ -1123,12 +1133,11 @@ def render_graph_pyvis(nx_graph, concept_abstract_map, physics_enabled=True,
             mass=max(1, 1 + freq * 0.05)
         )
 
-    # ─── EDGES WITH SEMI-TRANSPARENT, COLOR-CODED STYLING ───
     color_map = {
-        'cooccurrence': "rgba(56, 189, 248, 0.45)",   # Sky blue
-        'semantic':     "rgba(251, 146, 60, 0.40)",   # Orange
-        'bridge':       "rgba(250, 204, 21, 0.55)",   # Yellow
-        'unknown':      "rgba(148, 163, 184, 0.30)"   # Slate
+        'cooccurrence': theme['edge_cooccurrence'],
+        'semantic':     theme['edge_semantic'],
+        'bridge':       theme['edge_bridge'],
+        'unknown':      theme['edge_unknown']
     }
 
     for u, v in nx_graph.edges():
@@ -1143,8 +1152,8 @@ def render_graph_pyvis(nx_graph, concept_abstract_map, physics_enabled=True,
             width=width,
             color={
                 'color': color,
-                'highlight': '#ff6b6b',
-                'hover': '#ffd93d',
+                'highlight': theme['highlight_bg'],
+                'hover': theme['hover_bg'],
                 'opacity': 0.85
             },
             smooth={'type': 'continuous', 'roundness': 0.35},
@@ -1153,38 +1162,37 @@ def render_graph_pyvis(nx_graph, concept_abstract_map, physics_enabled=True,
 
     html_content = net.generate_html()
 
-    # ─── INJECT CUSTOM CSS FOR DARK-MODE TOOLTIPS & CANVAS ───
-    custom_css = """
+    custom_css = f"""
     <style>
-        body {
-            background: #0f172a;
+        body {{
+            background: {theme['bg']};
             margin: 0;
             padding: 0;
             font-family: 'Inter', 'Segoe UI', sans-serif;
-        }
-        #mynetwork {
+        }}
+        #mynetwork {{
             border-radius: 16px;
-            box-shadow: 0 12px 48px rgba(0,0,0,0.4);
+            box-shadow: 0 12px 48px {theme['shadow_color']};
             outline: none;
-        }
-        div.vis-tooltip {
-            background: rgba(15, 23, 42, 0.95) !important;
-            color: #e2e8f0 !important;
-            border: 1px solid #334155 !important;
+        }}
+        div.vis-tooltip {{
+            background: {theme['tooltip_bg']} !important;
+            color: {theme['tooltip_text']} !important;
+            border: 1px solid {theme['tooltip_border']} !important;
             border-radius: 10px !important;
             padding: 14px 18px !important;
             font-family: 'Inter', 'Segoe UI', sans-serif !important;
             font-size: 13px !important;
             line-height: 1.5 !important;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.5) !important;
+            box-shadow: 0 8px 32px {theme['shadow_color']} !important;
             max-width: 320px !important;
             white-space: normal !important;
-        }
-        div.vis-network div.vis-manipulation {
-            background: rgba(30, 41, 59, 0.9) !important;
-            border-top: 1px solid #334155 !important;
-            color: #e2e8f0 !important;
-        }
+        }}
+        div.vis-network div.vis-manipulation {{
+            background: {theme['tooltip_bg']} !important;
+            border-top: 1px solid {theme['tooltip_border']} !important;
+            color: {theme['font']} !important;
+        }}
     </style>
     """
     html_content = html_content.replace('</head>', custom_css + '</head>')
@@ -1201,7 +1209,10 @@ def render_graph_pyvis(nx_graph, concept_abstract_map, physics_enabled=True,
         st.error(f"Download preparation failed: {e}")
 
 def render_graph_plotly_2d(nx_graph, concept_abstract_map, cmap_name="viridis",
-                            custom_labels=None, top_n_nodes=0, node_label_size=10):
+                            custom_labels=None, top_n_nodes=0, node_label_size=10,
+                            theme=None):
+    if theme is None:
+        theme = THEME_PRESETS["Bright (Default)"]
     if top_n_nodes > 0 and len(nx_graph.nodes()) > top_n_nodes:
         degrees = dict(nx_graph.degree())
         top_nodes = sorted(degrees.keys(), key=lambda x: degrees[x], reverse=True)[:top_n_nodes]
@@ -1216,7 +1227,7 @@ def render_graph_plotly_2d(nx_graph, concept_abstract_map, cmap_name="viridis",
         edge_type = nx_graph[u][v].get('edge_type', 'unknown')
         edge_hover.extend([f"<b>{u} ↔ {v}</b><br>Weight: {w:.2f}<br>Type: {edge_type}"] * 2 + [None])
     edge_trace = go.Scatter(x=edge_x, y=edge_y, mode='lines',
-                            line=dict(width=1, color='#888'),
+                            line=dict(width=1, color=theme['edge_unknown']),
                             hoverinfo='text', hovertext=edge_hover, name='Connections')
     node_x, node_y, node_text, node_size, node_color, node_labels = [], [], [], [], [], []
     for i, node in enumerate(nx_graph.nodes()):
@@ -1230,19 +1241,25 @@ def render_graph_plotly_2d(nx_graph, concept_abstract_map, cmap_name="viridis",
         node_labels.append(custom_labels.get(node, node) if custom_labels else node)
     node_trace = go.Scatter(x=node_x, y=node_y, mode='markers+text',
                             marker=dict(size=node_size, color=node_color,
-                                       line=dict(width=2, color='#ffffff')),
+                                       line=dict(width=2, color=theme['node_border'])),
                             text=node_labels, textposition="bottom center",
-                            textfont=dict(size=node_label_size, color='#000000'),
+                            textfont=dict(size=node_label_size, color=theme['font']),
                             hovertext=node_text, hoverinfo='text', name='Concepts')
     fig = go.Figure(data=[edge_trace, node_trace],
                     layout=go.Layout(showlegend=False, hovermode='closest',
                                      margin=dict(b=0, l=0, r=0, t=0),
-                                     plot_bgcolor='#ffffff', paper_bgcolor='#ffffff',
-                                     xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                                     yaxis=dict(showgrid=False, zeroline=False, showticklabels=False)))
+                                     plot_bgcolor=theme['plotly_bg'], paper_bgcolor=theme['plotly_paper'],
+                                     font=dict(color=theme['font']),
+                                     xaxis=dict(showgrid=True, gridcolor=theme['grid_color'],
+                                                zeroline=False, showticklabels=False, linecolor=theme['axis_color']),
+                                     yaxis=dict(showgrid=True, gridcolor=theme['grid_color'],
+                                                zeroline=False, showticklabels=False, linecolor=theme['axis_color'])))
     st.plotly_chart(fig, use_container_width=True)
 
-def render_graph_plotly_3d(nx_graph, concept_abstract_map, cmap_name="viridis", top_n_nodes=0):
+def render_graph_plotly_3d(nx_graph, concept_abstract_map, cmap_name="viridis", top_n_nodes=0,
+                            theme=None):
+    if theme is None:
+        theme = THEME_PRESETS["Bright (Default)"]
     if len(nx_graph.nodes()) < 3:
         st.info("3D view requires ≥3 nodes.")
         return
@@ -1257,7 +1274,7 @@ def render_graph_plotly_3d(nx_graph, concept_abstract_map, cmap_name="viridis", 
         x0, y0, z0 = pos_3d[u]; x1, y1, z1 = pos_3d[v]
         edge_x.extend([x0, x1, None]); edge_y.extend([y0, y1, None]); edge_z.extend([z0, z1, None])
     edge_trace = go.Scatter3d(x=edge_x, y=edge_y, z=edge_z, mode='lines',
-                              line=dict(width=2, color='#888'), hoverinfo='skip')
+                              line=dict(width=2, color=theme['edge_unknown']), hoverinfo='skip')
     node_x, node_y, node_z, node_text, node_size, node_color, node_labels = [], [], [], [], [], [], []
     for i, node in enumerate(nx_graph.nodes()):
         x, y, z = pos_3d[node]
@@ -1270,17 +1287,20 @@ def render_graph_plotly_3d(nx_graph, concept_abstract_map, cmap_name="viridis", 
     node_trace = go.Scatter3d(x=node_x, y=node_y, z=node_z, mode='markers+text',
                                 marker=dict(size=node_size, color=node_color, opacity=0.9),
                                 text=node_labels, textposition="top center",
-                                textfont=dict(size=8, color='#000000'),
+                                textfont=dict(size=8, color=theme['font']),
                                 hovertext=node_text, hoverinfo='text')
     fig = go.Figure(data=[edge_trace, node_trace],
-                    layout=go.Layout(scene=dict(xaxis=dict(showbackground=False),
-                                                 yaxis=dict(showbackground=False),
-                                                 zaxis=dict(showbackground=False)),
-                                     margin=dict(l=0, r=0, b=0, t=0), showlegend=False))
+                    layout=go.Layout(scene=dict(xaxis=dict(showbackground=False, gridcolor=theme['grid_color'], linecolor=theme['axis_color']),
+                                                 yaxis=dict(showbackground=False, gridcolor=theme['grid_color'], linecolor=theme['axis_color']),
+                                                 zaxis=dict(showbackground=False, gridcolor=theme['grid_color'], linecolor=theme['axis_color'])),
+                                     margin=dict(l=0, r=0, b=0, t=0), showlegend=False,
+                                     paper_bgcolor=theme['plotly_paper']))
     st.plotly_chart(fig, use_container_width=True)
 
-def render_graph_fallback(nx_graph, concept_abstract_map):
-    st.markdown("### 📊 Graph Summary (Text View)")
+def render_graph_fallback(nx_graph, concept_abstract_map, theme=None):
+    if theme is None:
+        theme = THEME_PRESETS["Bright (Default)"]
+    st.markdown(f"### 📊 Graph Summary (Text View)")
     st.markdown(f"- **Nodes**: {len(nx_graph.nodes())}")
     st.markdown(f"- **Edges**: {len(nx_graph.edges())}")
     if len(nx_graph.edges()) > 0:
@@ -1321,7 +1341,7 @@ def build_category_hierarchy(valid_concepts: List[str], concept_abstract_map: Di
             labels.append(child); parents.append(parent); values.append(cnt)
     return labels, parents, values
 
-def render_sunburst_chart(labels, parents, values, cmap_name="viridis", label_size=11, width=800, height=600):
+def render_sunburst_chart(labels, parents, values, cmap_name="viridis", label_size=11, width=800, height=600, theme=None):
     if not labels or len(labels) < 2:
         st.info("Not enough categories for sunburst chart.")
         return
@@ -1366,7 +1386,7 @@ def render_sunburst_chart(labels, parents, values, cmap_name="viridis", label_si
     )
     st.plotly_chart(fig, use_container_width=True)
 
-def render_radar_chart(concept_scores_df: pd.DataFrame, top_k: int = 15, cmap_name: str = "viridis"):
+def render_radar_chart(concept_scores_df: pd.DataFrame, top_k: int = 15, cmap_name: str = "viridis", theme=None):
     if concept_scores_df.empty or len(concept_scores_df) < 2:
         st.info("Not enough concepts for radar chart.")
         return
@@ -1400,6 +1420,8 @@ def render_radar_chart(concept_scores_df: pd.DataFrame, top_k: int = 15, cmap_na
         polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
         title="Top Concepts: Multi-Dimensional Comparison",
         showlegend=True, width=750, height=600,
+        paper_bgcolor=theme["plotly_paper"] if theme else "#ffffff",
+        font=dict(color=theme["font"] if theme else "#000000"),
         legend=dict(orientation="h", yanchor="bottom", y=-0.2)
     )
     st.plotly_chart(fig, use_container_width=True)
@@ -1477,7 +1499,7 @@ def compute_graph_metrics(G: nx.Graph) -> dict:
         metrics["top_bridges"] = []
     return metrics
 
-def display_metric_dashboard(metrics: dict):
+def display_metric_dashboard(metrics: dict, theme=None):
     if not metrics:
         st.warning("No graph metrics available.")
         return
@@ -1493,9 +1515,6 @@ def display_metric_dashboard(metrics: dict):
         bridge_df = pd.DataFrame(metrics["top_bridges"], columns=["Concept", "Bridge Score"])
         st.dataframe(bridge_df, use_container_width=True)
 
-# ==========================================
-# SIDEBAR CONFIGURATION
-# ==========================================
 # ==========================================
 # THEME CONFIGURATION
 # ==========================================
@@ -1570,34 +1589,37 @@ THEME_PRESETS = {
 
 PHYSICS_PRESETS = {
     "Stable (Default)": {
-        "gravitationalConstant": -2500, "centralGravity": 0.25,
-        "springLength": 140, "springConstant": 0.015,
-        "damping": 0.55, "overlap": 0.15, "stabilization": 2500
+        "damping": 0.55, "gravity": -2500, "spring_length": 140,
+        "spring_strength": 0.05, "central_gravity": 0.25, "stabilization": 2500
     },
     "Fluid": {
-        "gravitationalConstant": -1800, "centralGravity": 0.35,
-        "springLength": 120, "springConstant": 0.025,
-        "damping": 0.25, "overlap": 0.25, "stabilization": 1200
+        "damping": 0.25, "gravity": -1800, "spring_length": 120,
+        "spring_strength": 0.05, "central_gravity": 0.30, "stabilization": 1500
     },
     "Tight": {
-        "gravitationalConstant": -4000, "centralGravity": 0.45,
-        "springLength": 80, "springConstant": 0.04,
-        "damping": 0.70, "overlap": 0.05, "stabilization": 3000
+        "damping": 0.70, "gravity": -4000, "spring_length": 80,
+        "spring_strength": 0.08, "central_gravity": 0.20, "stabilization": 3000
+    },
+    "Off": {
+        "damping": 0.99, "gravity": 0, "spring_length": 200,
+        "spring_strength": 0.0, "central_gravity": 0.0, "stabilization": 0
     }
 }
 
+# ==========================================
+# SIDEBAR CONFIGURATION
+# ==========================================
 def render_sidebar():
     with st.sidebar:
         st.header("⚙️ Configuration")
 
-        # ─── THEME SELECTION ───
         st.subheader("🎨 Theme")
         st.session_state['theme'] = st.selectbox(
             "Color theme:",
-            ["Bright (Default)", "Dark", "Midnight", "Warm", "Forest", "Ocean"],
-            index=0,
-            help="Choose the visual theme for all graph visualizations"
+            options=list(THEME_PRESETS.keys()),
+            index=0
         )
+        theme = THEME_PRESETS[st.session_state['theme']]
 
         st.subheader("🔬 Nanomaterials Focus Areas")
         st.markdown("- Nanotwinned Cu (twin boundaries, CTB/ITB)")
@@ -1616,683 +1638,81 @@ def render_sidebar():
             "Colormap:", options=list(SUPPORTED_COLORMAPS.keys()), index=0
         )
 
-        # ─── PHYSICS TUNING ───
-        st.subheader("⚡ Physics Tuning")
-        physics_mode = st.selectbox(
+        st.subheader("🔧 Physics & Layout")
+        st.session_state['physics_preset'] = st.selectbox(
             "Physics preset:",
-            ["Stable (Default)", "Fluid", "Tight", "Off"],
-            index=0,
-            help="Stable = minimal movement, fast settle. Fluid = organic movement. Tight = compact. Off = static."
+            options=list(PHYSICS_PRESETS.keys()),
+            index=0
         )
-        st.session_state['physics_preset'] = physics_mode
-
-        # Only show advanced sliders if not "Off"
-        if physics_mode != "Off":
-            with st.expander("🔧 Advanced Physics Sliders", expanded=False):
-                st.session_state['physics_damping'] = st.slider(
-                    "Damping (friction)", 0.05, 0.95, 0.55, 0.05,
-                    help="Higher = less dancing, faster settle"
-                )
-                st.session_state['physics_gravity'] = st.slider(
-                    "Repulsion strength", -8000, -500, -2500, 100,
-                    help="More negative = nodes push harder"
-                )
-                st.session_state['physics_spring_length'] = st.slider(
-                    "Spring length", 50, 400, 140, 10,
-                    help="Higher = more spread out"
-                )
-                st.session_state['physics_spring_constant'] = st.slider(
-                    "Spring stiffness", 0.001, 0.1, 0.015, 0.005,
-                    help="Higher = tighter springs"
-                )
-                st.session_state['physics_central_gravity'] = st.slider(
-                    "Central gravity", 0.0, 1.0, 0.25, 0.05,
-                    help="Pull toward center"
-                )
-                st.session_state['physics_stabilization'] = st.slider(
-                    "Stabilization iterations", 100, 5000, 2500, 100,
-                    help="More = more stable start, slower load"
-                )
-
-        st.session_state['physics_enabled'] = (physics_mode != "Off")
-
-        # ─── TOP N CONTROLS WITH "ALL" OPTION ───
-        st.subheader("📐 Display Limits")
-
-        # Helper to create slider with "All" checkbox
-        def all_slider(label, min_val, max_val, default, step, key):
-            col1, col2 = st.columns([3, 1])
-            with col2:
-                use_all = st.checkbox("All", value=(default == 0), key=f"{key}_all")
-            with col1:
-                if use_all:
-                    val = st.slider(label, min_val, max_val, max_val, step, key=key, disabled=True)
-                    st.session_state[key] = 0  # 0 means "all"
-                else:
-                    val = st.slider(label, min_val, max_val, default if default > 0 else max_val, step, key=key)
-                    st.session_state[key] = val
-            return st.session_state[key]
-
-        all_slider("Max nodes in graph", 50, 500, 0, 50, 'top_n_graph')
-        all_slider("Max children/category", 10, 100, 0, 10, 'top_n_sunburst')
-        all_slider("Top K for radar", 5, 30, 0, 1, 'top_n_radar')
-
-        st.subheader("🔧 Graph Parameters")
-        st.session_state['min_freq'] = st.slider("Min concept frequency", 1, 20, 1)
-        st.session_state['min_words'] = st.slider("Min words per concept", 2, 5, 2)
-        st.session_state['sim_threshold'] = st.slider("Semantic threshold", 0.6, 0.95, 0.85, step=0.05)
-        st.session_state['cooc_weight'] = st.slider("Co-occurrence weight", 0.5, 1.0, 0.9, step=0.1)
-        st.session_state['sem_weight'] = st.slider("Semantic weight", 0.0, 0.5, 0.1, step=0.1)
-
-        st.subheader("📊 Statistics")
-        st.session_state['bootstrap_samples'] = st.slider("Bootstrap samples", 100, 2000, 500, step=100)
-        st.session_state['alpha_level'] = st.selectbox("Significance α", [0.01, 0.05, 0.10], index=1)
-
-        st.markdown("---")
-        if st.button("🗑️ Clear Cache"):
-            st.cache_resource.clear()
-            st.cache_data.clear()
-            gc.collect()
-            st.success("Cache cleared!")
-        gpu_info = "CUDA" if torch.cuda.is_available() else "CPU"
-        st.caption(f"🖥️ Device: {gpu_info}")
-
-def render_graph_pyvis(nx_graph, concept_abstract_map, physics_enabled=True,
-                        min_node_size=8, max_node_size=40, cmap_name="viridis",
-                        custom_labels=None, node_label_size=12, top_n_nodes=0):
-    if top_n_nodes > 0 and len(nx_graph.nodes()) > top_n_nodes:
-        degrees = dict(nx_graph.degree(weight='weight'))
-        top_nodes = sorted(degrees.keys(), key=lambda x: degrees[x], reverse=True)[:top_n_nodes]
-        nx_graph = nx_graph.subgraph(top_nodes).copy()
-
-    # ─── THEME RESOLUTION ───
-    theme_name = st.session_state.get('theme', 'Bright (Default)')
-    theme = THEME_PRESETS.get(theme_name, THEME_PRESETS["Bright (Default)"])
-
-    # ─── STABLE LAYOUT: Pre-compute deterministic positions ───
-    pos = {}
-    if len(nx_graph.nodes()) > 0:
-        try:
-            if len(nx_graph.nodes()) < 300:
-                pos = nx.kamada_kawai_layout(nx_graph, weight='weight')
-            else:
-                pos = nx.spring_layout(nx_graph, k=2.5, iterations=200, seed=42, weight='weight')
-        except Exception:
-            pos = nx.spring_layout(nx_graph, k=2.5, iterations=200, seed=42, weight='weight')
-
-    cmap_colors = get_colormap_colors(cmap_name, len(nx_graph.nodes()))
-
-    # ─── PHYSICS PRESET RESOLUTION ───
-    physics_preset_name = st.session_state.get('physics_preset', 'Stable (Default)')
-    preset = PHYSICS_PRESETS.get(physics_preset_name, PHYSICS_PRESETS["Stable (Default)"])
-
-    # Override with user sliders if advanced mode is active
-    if physics_enabled and physics_preset_name not in ["Off"]:
-        damping = st.session_state.get('physics_damping', preset['damping'])
-        gravity = st.session_state.get('physics_gravity', preset['gravitationalConstant'])
-        spring_len = st.session_state.get('physics_spring_length', preset['springLength'])
-        spring_k = st.session_state.get('physics_spring_constant', preset['springConstant'])
-        central_g = st.session_state.get('physics_central_gravity', preset['centralGravity'])
-        stab_iter = st.session_state.get('physics_stabilization', preset['stabilization'])
-    else:
-        damping = preset['damping']
-        gravity = preset['gravitationalConstant']
-        spring_len = preset['springLength']
-        spring_k = preset['springConstant']
-        central_g = preset['centralGravity']
-        stab_iter = preset['stabilization']
-
-    # ─── NETWORK INITIALIZATION WITH THEME ───
-    net = Network(
-        height="780px", width="100%", bgcolor=theme['bg'], font_color=theme['font'],
-        select_menu=True, notebook=False, cdn_resources='remote'
-    )
-
-    if physics_enabled:
-        net.set_options(f"""
-        var options = {{
-          "physics": {{
-            "enabled": true,
-            "solver": "barnesHut",
-            "barnesHut": {{
-              "gravitationalConstant": {gravity},
-              "centralGravity": {central_g},
-              "springLength": {spring_len},
-              "springConstant": {spring_k},
-              "damping": {damping},
-              "overlap": {preset['overlap']}
-            }},
-            "stabilization": {{
-              "enabled": true,
-              "iterations": {stab_iter},
-              "updateInterval": 30,
-              "onlyDynamicEdges": false,
-              "fit": true
-            }}
-          }},
-          "interaction": {{
-            "hover": true,
-            "tooltipDelay": 180,
-            "hideEdgesOnDrag": false,
-            "zoomView": true,
-            "dragView": true
-          }}
-        }}
-        """)
-    else:
-        net.set_options("""
-        var options = {
-          "physics": { "enabled": false },
-          "interaction": { "hover": true, "dragNodes": true, "dragView": true, "zoomView": true }
-        }
-        """)
-
-    # ─── NODES WITH THEME-AWARE STYLING ───
-    for i, node in enumerate(nx_graph.nodes()):
-        freq = len(concept_abstract_map.get(node, []))
-        size = int(np.clip(min_node_size + freq * 1.2, min_node_size, max_node_size))
-        color = get_nanomaterials_category_color(node, cmap_colors)
-        degree = int(nx_graph.degree(node))
-        label = custom_labels.get(node, node) if custom_labels else node
-
-        x, y = (pos.get(node, (0, 0))[0] * 1200, pos.get(node, (0, 0))[1] * 1200)
-
-        net.add_node(
-            node,
-            label=label,
-            size=size,
-            x=x,
-            y=y,
-            color={
-                'background': color,
-                'border': theme['node_border'],
-                'highlight': {'background': theme['highlight_bg'], 'border': '#ffffff'},
-                'hover': {'background': theme['hover_bg'], 'border': '#ffffff'}
-            },
-            font={
-                'color': theme['font'],
-                'size': node_label_size,
-                'face': 'Inter, Segoe UI, Roboto, sans-serif',
-                'strokeWidth': 0,
-                'vadjust': -6
-            },
-            title=(
-                f"<div style='font-family:Inter,sans-serif;'>"
-                f"<b style='font-size:14px;color:{theme['highlight_bg']};'>{node}</b><br>"
-                f"<span style='color:{theme['tooltip_text']};opacity:0.7;'>Degree:</span> {degree}<br>"
-                f"<span style='color:{theme['tooltip_text']};opacity:0.7;'>Frequency:</span> {freq}"
-                f"</div>"
-            ),
-            borderWidth=2,
-            borderWidthSelected=3,
-            shadow={
-                'enabled': True,
-                'color': theme['shadow_color'],
-                'size': 12,
-                'x': 4,
-                'y': 4
-            },
-            shape='dot',
-            mass=max(1, 1 + freq * 0.05)
+        preset = PHYSICS_PRESETS[st.session_state['physics_preset']]
+        st.session_state['physics_enabled'] = st.checkbox(
+            "Enable physics", value=(preset["gravity"] != 0)
         )
 
-    # ─── EDGES WITH THEME-AWARE COLORS ───
-    color_map = {
-        'cooccurrence': theme['edge_cooccurrence'],
-        'semantic':     theme['edge_semantic'],
-        'bridge':       theme['edge_bridge'],
-        'unknown':      theme['edge_unknown']
-    }
+        with st.expander("⚙️ Advanced Physics Overrides"):
+            st.session_state['adv_damping'] = st.slider("Damping", 0.05, 0.95, preset["damping"], step=0.05)
+            st.session_state['adv_gravity'] = st.slider("Repulsion", -8000, -500, preset["gravity"], step=100)
+            st.session_state['adv_spring_length'] = st.slider("Spring length", 40, 300, preset["spring_length"], step=10)
+            st.session_state['adv_spring_strength'] = st.slider("Spring strength", 0.01, 0.20, preset["spring_strength"], step=0.01)
+            st.session_state['adv_central_gravity'] = st.slider("Central gravity", 0.0, 0.5, preset["central_gravity"], step=0.05)
+            st.session_state['adv_stabilization'] = st.slider("Stabilization iter", 0, 5000, preset["stabilization"], step=250)
 
-    for u, v in nx_graph.edges():
-        w = nx_graph[u][v].get('weight', 1)
-        edge_type = nx_graph[u][v].get('edge_type', 'unknown')
-        color = color_map.get(edge_type, color_map['unknown'])
-        width = float(np.clip(w * 0.4, 0.8, 3.5))
+        # Build effective physics preset from base + overrides
+        base_preset = PHYSICS_PRESETS[st.session_state['physics_preset']].copy()
+        if st.session_state.get('adv_damping') is not None:
+            base_preset["damping"] = st.session_state['adv_damping']
+            base_preset["gravity"] = st.session_state['adv_gravity']
+            base_preset["spring_length"] = st.session_state['adv_spring_length']
+            base_preset["spring_strength"] = st.session_state['adv_spring_strength']
+            base_preset["central_gravity"] = st.session_state['adv_central_gravity']
+            base_preset["stabilization"] = st.session_state['adv_stabilization']
+        st.session_state['effective_physics'] = base_preset
 
-        net.add_edge(
-            u, v,
-            value=float(np.clip(w, 0.5, 5)),
-            width=width,
-            color={
-                'color': color,
-                'highlight': theme['highlight_bg'],
-                'hover': theme['hover_bg'],
-                'opacity': 0.85
-            },
-            smooth={'type': 'continuous', 'roundness': 0.35},
-            title=f"<span style='font-family:Inter,sans-serif;'>Weight: <b>{w:.2f}</b><br>Type: {edge_type}</span>"
-        )
-
-    html_content = net.generate_html()
-
-    # ─── THEME-AWARE CUSTOM CSS ───
-    custom_css = f"""
-    <style>
-        body {{
-            background: {theme['bg']};
-            margin: 0;
-            padding: 0;
-            font-family: 'Inter', 'Segoe UI', sans-serif;
-        }}
-        #mynetwork {{
-            border-radius: 16px;
-            box-shadow: 0 12px 48px {theme['shadow_color']};
-            outline: none;
-        }}
-        div.vis-tooltip {{
-            background: {theme['tooltip_bg']} !important;
-            color: {theme['tooltip_text']} !important;
-            border: 1px solid {theme['tooltip_border']} !important;
-            border-radius: 10px !important;
-            padding: 14px 18px !important;
-            font-family: 'Inter', 'Segoe UI', sans-serif !important;
-            font-size: 13px !important;
-            line-height: 1.5 !important;
-            box-shadow: 0 8px 32px {theme['shadow_color']} !important;
-            max-width: 320px !important;
-            white-space: normal !important;
-        }}
-        div.vis-network div.vis-manipulation {{
-            background: {theme['tooltip_bg']} !important;
-            border-top: 1px solid {theme['tooltip_border']} !important;
-            color: {theme['font']} !important;
-        }}
-    </style>
-    """
-    html_content = html_content.replace('</head>', custom_css + '</head>')
-
-    st.components.v1.html(html_content, height=790, scrolling=True)
-
-    try:
-        html_bytes = html_content.encode('utf-8')
-        st.download_button("📥 Download Interactive Graph (HTML)", data=html_bytes,
-                          file_name="nanomaterials_concept_graph.html", mime="text/html")
-        del html_content, html_bytes
-        gc.collect()
-    except Exception as e:
-        st.error(f"Download preparation failed: {e}")
-
-def render_graph_plotly_2d(nx_graph, concept_abstract_map, cmap_name="viridis",
-                            custom_labels=None, top_n_nodes=0, node_label_size=10):
-    if top_n_nodes > 0 and len(nx_graph.nodes()) > top_n_nodes:
-        degrees = dict(nx_graph.degree())
-        top_nodes = sorted(degrees.keys(), key=lambda x: degrees[x], reverse=True)[:top_n_nodes]
-        nx_graph = nx_graph.subgraph(top_nodes).copy()
-
-    # Theme
-    theme_name = st.session_state.get('theme', 'Bright (Default)')
-    theme = THEME_PRESETS.get(theme_name, THEME_PRESETS["Bright (Default)"])
-
-    pos = nx.spring_layout(nx_graph, k=1.5, iterations=50, seed=42)
-    cmap_colors = get_colormap_colors(cmap_name, len(nx_graph.nodes()))
-
-    edge_x, edge_y, edge_hover = [], [], []
-    for u, v in nx_graph.edges():
-        x0, y0 = pos[u]; x1, y1 = pos[v]
-        edge_x.extend([x0, x1, None]); edge_y.extend([y0, y1, None])
-        w = nx_graph[u][v].get('weight', 1)
-        edge_type = nx_graph[u][v].get('edge_type', 'unknown')
-        edge_hover.extend([f"<b>{u} ↔ {v}</b><br>Weight: {w:.2f}<br>Type: {edge_type}"] * 2 + [None])
-
-    edge_trace = go.Scatter(
-        x=edge_x, y=edge_y, mode='lines',
-        line=dict(width=1, color=theme['edge_unknown']),
-        hoverinfo='text', hovertext=edge_hover, name='Connections'
-    )
-
-    node_x, node_y, node_text, node_size, node_color, node_labels = [], [], [], [], [], []
-    for i, node in enumerate(nx_graph.nodes()):
-        x, y = pos[node]
-        node_x.append(x); node_y.append(y)
-        deg = nx_graph.degree(node)
-        freq = len(concept_abstract_map.get(node, []))
-        node_text.append(f"{node}<br>Degree: {deg}<br>Frequency: {freq}")
-        node_size.append(max(8, min(35, deg * 2.5 + 10)))
-        node_color.append(cmap_colors[i])
-        node_labels.append(custom_labels.get(node, node) if custom_labels else node)
-
-    node_trace = go.Scatter(
-        x=node_x, y=node_y, mode='markers+text',
-        marker=dict(
-            size=node_size, color=node_color,
-            line=dict(width=2, color=theme['node_border'])
-        ),
-        text=node_labels, textposition="bottom center",
-        textfont=dict(size=node_label_size, color=theme['font']),
-        hovertext=node_text, hoverinfo='text', name='Concepts'
-    )
-
-    fig = go.Figure(
-        data=[edge_trace, node_trace],
-        layout=go.Layout(
-            showlegend=False, hovermode='closest',
-            margin=dict(b=0, l=0, r=0, t=0),
-            plot_bgcolor=theme['plotly_bg'],
-            paper_bgcolor=theme['plotly_paper'],
-            font=dict(color=theme['font']),
-            xaxis=dict(
-                showgrid=True, gridcolor=theme['grid_color'],
-                zeroline=False, showticklabels=False, linecolor=theme['axis_color']
-            ),
-            yaxis=dict(
-                showgrid=True, gridcolor=theme['grid_color'],
-                zeroline=False, showticklabels=False, linecolor=theme['axis_color']
+        st.subheader("📊 Display Limits")
+        col_all1, col_slider1 = st.columns([0.3, 0.7])
+        with col_all1:
+            all_graph = st.checkbox("All", value=True, key="all_graph_chk")
+        with col_slider1:
+            st.session_state['top_n_graph'] = st.slider(
+                "Max nodes", 50, 500, 200, step=50, disabled=all_graph,
+                key="top_n_graph_slider"
             )
-        )
-    )
-    st.plotly_chart(fig, use_container_width=True)
+        if all_graph:
+            st.session_state['top_n_graph'] = 0
 
-def render_graph_plotly_3d(nx_graph, concept_abstract_map, cmap_name="viridis", top_n_nodes=0):
-    if len(nx_graph.nodes()) < 3:
-        st.info("3D view requires ≥3 nodes.")
-        return
-    if top_n_nodes > 0 and len(nx_graph.nodes()) > top_n_nodes:
-        degrees = dict(nx_graph.degree())
-        top_nodes = sorted(degrees.keys(), key=lambda x: degrees[x], reverse=True)[:top_n_nodes]
-        nx_graph = nx_graph.subgraph(top_nodes).copy()
+        col_all2, col_slider2 = st.columns([0.3, 0.7])
+        with col_all2:
+            all_sun = st.checkbox("All", value=True, key="all_sun_chk")
+        with col_slider2:
+            st.session_state['top_n_sunburst'] = st.slider(
+                "Max children/category", 10, 100, 40, step=10, disabled=all_sun,
+                key="top_n_sunburst_slider"
+            )
+        if all_sun:
+            st.session_state['top_n_sunburst'] = 0
 
-    # Theme
-    theme_name = st.session_state.get('theme', 'Bright (Default)')
-    theme = THEME_PRESETS.get(theme_name, THEME_PRESETS["Bright (Default)"])
+        col_all3, col_slider3 = st.columns([0.3, 0.7])
+        with col_all3:
+            all_radar = st.checkbox("All", value=True, key="all_radar_chk")
+        with col_slider3:
+            st.session_state['top_n_radar'] = st.slider(
+                "Top K for radar", 5, 30, 15, disabled=all_radar,
+                key="top_n_radar_slider"
+            )
+        if all_radar:
+            st.session_state['top_n_radar'] = 0
 
-    pos_3d = nx.spring_layout(nx_graph, dim=3, seed=42)
-    cmap_colors = get_colormap_colors(cmap_name, len(nx_graph.nodes()))
-
-    edge_x, edge_y, edge_z = [], [], []
-    for u, v in nx_graph.edges():
-        x0, y0, z0 = pos_3d[u]; x1, y1, z1 = pos_3d[v]
-        edge_x.extend([x0, x1, None]); edge_y.extend([y0, y1, None]); edge_z.extend([z0, z1, None])
-
-    edge_trace = go.Scatter3d(
-        x=edge_x, y=edge_y, z=edge_z, mode='lines',
-        line=dict(width=2, color=theme['edge_unknown']), hoverinfo='skip'
-    )
-
-    node_x, node_y, node_z, node_text, node_size, node_color, node_labels = [], [], [], [], [], [], []
-    for i, node in enumerate(nx_graph.nodes()):
-        x, y, z = pos_3d[node]
-        node_x.append(x); node_y.append(y); node_z.append(z)
-        deg = nx_graph.degree(node); freq = len(concept_abstract_map.get(node, []))
-        node_text.append(f"{node}<br>Degree: {deg}<br>Frequency: {freq}")
-        node_size.append(max(6, min(25, deg * 2 + 8)))
-        node_color.append(cmap_colors[i])
-        node_labels.append(node)
-
-    node_trace = go.Scatter3d(
-        x=node_x, y=node_y, z=node_z, mode='markers+text',
-        marker=dict(size=node_size, color=node_color, opacity=0.9),
-        text=node_labels, textposition="top center",
-        textfont=dict(size=8, color=theme['font']),
-        hovertext=node_text, hoverinfo='text'
-    )
-
-    fig = go.Figure(
-        data=[edge_trace, node_trace],
-        layout=go.Layout(
-            scene=dict(
-                xaxis=dict(showbackground=False, gridcolor=theme['grid_color'], linecolor=theme['axis_color']),
-                yaxis=dict(showbackground=False, gridcolor=theme['grid_color'], linecolor=theme['axis_color']),
-                zaxis=dict(showbackground=False, gridcolor=theme['grid_color'], linecolor=theme['axis_color'])
-            ),
-            margin=dict(l=0, r=0, b=0, t=0),
-            showlegend=False,
-            paper_bgcolor=theme['plotly_paper']
-        )
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-def render_graph_fallback(nx_graph, concept_abstract_map):
-    theme_name = st.session_state.get('theme', 'Bright (Default)')
-    theme = THEME_PRESETS.get(theme_name, THEME_PRESETS["Bright (Default)"])
-
-    st.markdown(f"### 📊 Graph Summary (Text View)")
-    st.markdown(f"- **Nodes**: {len(nx_graph.nodes())}")
-    st.markdown(f"- **Edges**: {len(nx_graph.edges())}")
-    if len(nx_graph.edges()) > 0:
-        edge_list = [(u, v, nx_graph[u][v].get('weight', 1)) for u, v in nx_graph.edges()]
-        edge_list.sort(key=lambda x: x[2], reverse=True)
-        st.markdown("**🔗 Top 20 Strongest Connections:**")
-        for i, (u, v, w) in enumerate(edge_list[:20], 1):
-            edge_type = nx_graph[u][v].get('edge_type', 'unknown')
-            st.markdown(f"{i}. `{u}` ↔ `{v}` (weight: {w:.2f}, type: {edge_type})")
-    if len(concept_abstract_map) > 0:
-        freq_data = [(c, len(concept_abstract_map.get(c, []))) for c in nx_graph.nodes()]
-        freq_data.sort(key=lambda x: x[1], reverse=True)
-        st.markdown("**📈 Top Concepts by Frequency:**")
-        st.dataframe(pd.DataFrame(freq_data[:15], columns=["Concept", "Abstract Count"]), use_container_width=True)
-
-# ==========================================
-# SUNBURST & RADAR CHARTS
-# ==========================================
-def build_category_hierarchy(valid_concepts: List[str], concept_abstract_map: Dict, top_n_per_category: int = 40):
-    hierarchy = defaultdict(lambda: {"children": [], "count": 0})
-    category_map = abstract_concepts_to_categories(valid_concepts)
-    for concept in valid_concepts:
-        category = category_map.get(concept, 'general')
-        freq = len(concept_abstract_map.get(concept, []))
-        hierarchy[category]["children"].append((concept, freq))
-        hierarchy[category]["count"] += freq
-    for parent in list(hierarchy.keys()):
-        children = hierarchy[parent]["children"]
-        if top_n_per_category > 0 and len(children) > top_n_per_category:
-            children.sort(key=lambda x: x[1], reverse=True)
-            children = children[:top_n_per_category]
-            hierarchy[parent]["count"] = sum(cnt for _, cnt in children)
-            hierarchy[parent]["children"] = children
-    labels, parents, values = [], [], []
-    for parent, data in hierarchy.items():
-        labels.append(parent); parents.append(""); values.append(data["count"])
-        for child, cnt in data["children"]:
-            labels.append(child); parents.append(parent); values.append(cnt)
-    return labels, parents, values
-
-def render_sunburst_chart(labels, parents, values, cmap_name="viridis", label_size=11, width=800, height=600):
-    if not labels or len(labels) < 2:
-        st.info("Not enough categories for sunburst chart.")
-        return
-    n_items = len(labels)
-    use_remainder = n_items > 80
-    unique_ids = []; seen = {}
-    for i, lab in enumerate(labels):
-        base = lab[:25] + ("…" if len(lab) > 25 else "")
-        if base in seen:
-            unique_ids.append(f"{base}_{seen[base]}")
-            seen[base] += 1
-        else:
-            unique_ids.append(base); seen[base] = 1
-    parent_ids = []
-    for p in parents:
-        if p == "":
-            parent_ids.append("")
-        else:
-            for i, lab in enumerate(labels):
-                if lab == p:
-                    parent_ids.append(unique_ids[i])
-                    break
-            else:
-                parent_ids.append("")
-    colors = get_colormap_colors(cmap_name, len(unique_ids))
-    branchvalues = "remainder" if use_remainder else "total"
-    fig = go.Figure(go.Sunburst(
-        labels=unique_ids, parents=parent_ids, values=values, ids=unique_ids,
-        branchvalues=branchvalues,
-        marker=dict(colors=colors, line=dict(width=0.5, color="white")),
-        textinfo="label+percent entry+value",
-        insidetextorientation="radial",
-        textfont=dict(size=label_size),
-        hovertemplate='<b>%{label}</b><br>Value: %{value}<br>Parent: %{parent}<extra></extra>'
-    ))
-    fig.update_layout(
-        title="<b>Nanomaterials Research Domain Hierarchy</b><br><i>Size = concept frequency</i>",
-        font=dict(size=label_size, family="Arial"),
-        paper_bgcolor="white", plot_bgcolor="white",
-        width=width, height=height,
-        margin=dict(t=60, b=20, l=20, r=20)
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-def render_radar_chart(concept_scores_df: pd.DataFrame, top_k: int = 15, cmap_name: str = "viridis"):
-    if concept_scores_df.empty or len(concept_scores_df) < 2:
-        st.info("Not enough concepts for radar chart.")
-        return
-    metrics = ['frequency', 'semantic_density', 'coherence_score', 'distillation_efficiency']
-    available_metrics = [m for m in metrics if m in concept_scores_df.columns]
-    if not available_metrics:
-        st.warning("No metrics available for radar chart.")
-        return
-    top_concepts = concept_scores_df.nlargest(top_k, 'distillation_efficiency')
-    normalized = top_concepts.copy()
-    for m in available_metrics:
-        col = normalized[m]
-        if col.max() > col.min():
-            normalized[m] = (col - col.min()) / (col.max() - col.min())
-        else:
-            normalized[m] = 0.5
-    categories = available_metrics
-    fig = go.Figure()
-    colors = get_colormap_colors(cmap_name, len(normalized))
-    for idx, (_, row) in enumerate(normalized.iterrows()):
-        concept = row['concept']
-        values = [row[m] for m in categories]
-        values += values[:1]
-        angles = [n / len(categories) * 2 * np.pi for n in range(len(categories))]
-        angles += angles[:1]
-        fig.add_trace(go.Scatterpolar(
-            r=values, theta=categories, fill='toself', name=concept[:20],
-            line=dict(width=2, color=colors[idx]), fillcolor=colors[idx], opacity=0.6
-        ))
-    fig.update_layout(
-        polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
-        title="Top Concepts: Multi-Dimensional Comparison",
-        showlegend=True, width=750, height=600,
-        legend=dict(orientation="h", yanchor="bottom", y=-0.2)
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-# ==========================================
-# EXPORT FUNCTIONS
-# ==========================================
-def export_graph(nx_graph, concept_abstract_map, format_type: str):
-    if format_type == "GraphML":
-        try:
-            nx.write_graphml_lxml(nx_graph, "nano_graph.graphml")
-        except:
-            nx.write_graphml(nx_graph, "nano_graph.graphml")
-        with open("nano_graph.graphml", "rb") as f:
-            return f.read(), "application/graphml+xml", "nano_graph.graphml"
-    elif format_type == "JSON":
-        data = nx.node_link_data(nx_graph)
-        json_str = json.dumps(data, indent=2, default=str)
-        return json_str.encode('utf-8'), "application/json", "nano_graph.json"
-    elif format_type == "CSV (Edges)":
-        edge_data = []
-        for u, v, data in nx_graph.edges(data=True):
-            row = {"source": u, "target": v}
-            row.update({k: v for k, v in data.items() if isinstance(v, (str, int, float, bool))})
-            edge_data.append(row)
-        csv_df = pd.DataFrame(edge_data)
-        return csv_df.to_csv(index=False).encode('utf-8'), "text/csv", "nano_edges.csv"
-    elif format_type == "CSV (Nodes)":
-        node_data = []
-        for node in nx_graph.nodes():
-            row = {"concept": node, "frequency": len(concept_abstract_map.get(node, [])),
-                   "degree": nx_graph.degree(node)}
-            row.update({k: v for k, v in nx_graph.nodes[node].items()})
-            node_data.append(row)
-        csv_df = pd.DataFrame(node_data)
-        return csv_df.to_csv(index=False).encode('utf-8'), "text/csv", "nano_nodes.csv"
-    elif format_type == "PNG":
-        try:
-            pos = nx.spring_layout(nx_graph, seed=42)
-            plt.figure(figsize=(14, 12), dpi=300)
-            node_colors = [get_nanomaterials_category_color(n) for n in nx_graph.nodes()]
-            nx.draw(nx_graph, pos, with_labels=True, node_color=node_colors, edge_color='gray',
-                   node_size=400, font_size=7, font_weight='bold', edgecolors='white', linewidths=1)
-            import io
-            buf = io.BytesIO()
-            plt.savefig(buf, format='png', dpi=300, bbox_inches='tight', facecolor='white')
-            buf.seek(0); plt.close()
-            return buf.read(), "image/png", "nano_graph.png"
-        except Exception as e:
-            st.error(f"PNG export failed: {e}")
-            return None, None, None
-    return None, None, None
-
-# ==========================================
-# GRAPH METRICS DASHBOARD
-# ==========================================
-def compute_graph_metrics(G: nx.Graph) -> dict:
-    if G.number_of_nodes() == 0:
-        return {}
-    metrics = {
-        "nodes": G.number_of_nodes(),
-        "edges": G.number_of_edges(),
-        "density": nx.density(G),
-        "avg_degree": np.mean([d for _, d in G.degree()]),
-        "clustering": nx.average_clustering(G) if G.number_of_nodes() > 2 else 0,
-        "connected_components": nx.number_connected_components(G),
-        "avg_clustering": nx.average_clustering(G) if G.number_of_nodes() > 2 else 0
-    }
-    try:
-        bc = nx.betweenness_centrality(G, normalized=True, k=min(100, G.number_of_nodes()))
-        top_bridges = sorted(bc.items(), key=lambda x: x[1], reverse=True)[:10]
-        metrics["top_bridges"] = top_bridges
-        metrics["avg_betweenness"] = np.mean(list(bc.values()))
-    except Exception:
-        metrics["top_bridges"] = []
-    return metrics
-
-def display_metric_dashboard(metrics: dict):
-    if not metrics:
-        st.warning("No graph metrics available.")
-        return
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Nodes", metrics["nodes"]); col2.metric("Edges", metrics["edges"])
-    col3.metric("Density", f"{metrics['density']:.3f}"); col4.metric("Avg Degree", f"{metrics['avg_degree']:.2f}")
-    col5, col6, col7 = st.columns(3)
-    col5.metric("Clustering", f"{metrics['clustering']:.3f}")
-    col6.metric("Components", metrics["connected_components"])
-    col7.metric("Avg Betweenness", f"{metrics.get('avg_betweenness', 0):.3f}")
-    if metrics.get("top_bridges"):
-        st.markdown("**🌉 Top Bridge Concepts (High Betweenness)**")
-        bridge_df = pd.DataFrame(metrics["top_bridges"], columns=["Concept", "Bridge Score"])
-        st.dataframe(bridge_df, use_container_width=True)
-
-# ==========================================
-# SIDEBAR CONFIGURATION
-# ==========================================
-def render_sidebar():
-    with st.sidebar:
-        st.header("⚙️ Configuration")
-        st.subheader("🔬 Nanomaterials Focus Areas")
-        st.markdown("- Nanotwinned Cu (twin boundaries, CTB/ITB)")
-        st.markdown("- Core-shell Cu@Ag nanoparticles (interface engineering)")
-        st.markdown("- Defect-engineered Ag nanoparticles (vacancies, dislocations)")
-        st.markdown("- Mechanical properties (strength, ductility, hardness)")
-        st.markdown("- Synthesis (electrodeposition, SPD, annealing)")
-        st.markdown("- Characterization (TEM, EBSD, XRD, APT)")
-        st.markdown("- Computational methods (DFT, MD, ML potentials)")
-        st.subheader("🎨 Visualization")
-        st.session_state['viz_backend'] = st.selectbox(
-            "Engine:", ["PyVis (Interactive)", "Plotly 2D", "Plotly 3D", "Text Summary"], index=0
-        )
-        st.session_state['cmap_name'] = st.selectbox(
-            "Colormap:", options=list(SUPPORTED_COLORMAPS.keys()), index=0
-        )
-        st.session_state['physics_enabled'] = st.checkbox("Enable physics", value=True)
-        st.session_state['top_n_graph'] = st.slider("Max nodes in graph", 50, 500, 200, step=50)
-        st.session_state['top_n_sunburst'] = st.slider("Max children/category", 10, 100, 40, step=10)
-        st.session_state['top_n_radar'] = st.slider("Top K for radar", 5, 30, 15)
         st.subheader("🔧 Graph Parameters")
         st.session_state['min_freq'] = st.slider("Min concept frequency", 1, 20, 1)
         st.session_state['min_words'] = st.slider("Min words per concept", 2, 5, 2)
         st.session_state['sim_threshold'] = st.slider("Semantic threshold", 0.6, 0.95, 0.85, step=0.05)
         st.session_state['cooc_weight'] = st.slider("Co-occurrence weight", 0.5, 1.0, 0.9, step=0.1)
         st.session_state['sem_weight'] = st.slider("Semantic weight", 0.0, 0.5, 0.1, step=0.1)
+
         st.subheader("📐 Statistics")
         st.session_state['bootstrap_samples'] = st.slider("Bootstrap samples", 100, 2000, 500, step=100)
         st.session_state['alpha_level'] = st.selectbox("Significance α", [0.01, 0.05, 0.10], index=1)
+
         st.markdown("---")
         if st.button("🗑️ Clear Cache"):
             st.cache_resource.clear()
@@ -2302,9 +1722,6 @@ def render_sidebar():
         gpu_info = "CUDA" if torch.cuda.is_available() else "CPU"
         st.caption(f"🖥️ Device: {gpu_info}")
 
-# ==========================================
-# MAIN APPLICATION
-# ==========================================
 def main():
     st.title("🔬 Nanomaterials-ConceptGraph: Cu/Ag Nanostructure Explorer")
     st.caption("Large-corpus concept graph builder for nanotwinned Cu, core-shell Cu@Ag, and defect-engineered Ag nanoparticles • 3000+ abstracts optimized")
@@ -2500,31 +1917,38 @@ def main():
 
             viz_choice = st.session_state.get('viz_backend', 'PyVis (Interactive)')
             physics = st.session_state.get('physics_enabled', True)
+            physics_preset = st.session_state.get('effective_physics', PHYSICS_PRESETS["Stable (Default)"])
+            theme = THEME_PRESETS.get(st.session_state.get('theme', 'Bright (Default)'), THEME_PRESETS["Bright (Default)"])
 
-            # "All" means top_n_nodes = 0 (no filtering)
             top_n = st.session_state.get('top_n_graph', 0)
 
             if viz_choice == "PyVis (Interactive)":
                 render_graph_pyvis(nx_graph, concept_abstract_map, physics_enabled=physics,
-                                   cmap_name=cmap, top_n_nodes=top_n)
+                                   cmap_name=cmap, top_n_nodes=top_n,
+                                   theme=theme, physics_preset=physics_preset)
             elif viz_choice == "Plotly 2D":
-                render_graph_plotly_2d(nx_graph, concept_abstract_map, cmap_name=cmap, top_n_nodes=top_n)
+                render_graph_plotly_2d(nx_graph, concept_abstract_map, cmap_name=cmap, top_n_nodes=top_n,
+                                       theme=theme)
             elif viz_choice == "Plotly 3D":
-                render_graph_plotly_3d(nx_graph, concept_abstract_map, cmap_name=cmap, top_n_nodes=top_n)
+                render_graph_plotly_3d(nx_graph, concept_abstract_map, cmap_name=cmap, top_n_nodes=top_n,
+                                        theme=theme)
             else:
-                render_graph_fallback(nx_graph, concept_abstract_map)
+                render_graph_fallback(nx_graph, concept_abstract_map, theme=theme)
 
             with st.expander("📊 Graph Metrics"):
                 metrics = compute_graph_metrics(nx_graph)
-                display_metric_dashboard(metrics)
+                display_metric_dashboard(metrics, theme=theme)
 
             with st.expander("📈 Domain Hierarchy (Sunburst)"):
                 labels, parents, values = build_category_hierarchy(valid_concepts, concept_abstract_map,
                                                                     top_n_per_category=st.session_state.get('top_n_sunburst', 0))
-                render_sunburst_chart(labels, parents, values, cmap_name=cmap)
+                render_sunburst_chart(labels, parents, values, cmap_name=cmap, theme=theme)
 
             with st.expander("📡 Concept Radar"):
-                render_radar_chart(distill_df, top_k=st.session_state.get('top_n_radar', 0), cmap_name=cmap)
+                radar_k = st.session_state.get('top_n_radar', 15)
+                if radar_k == 0:
+                    radar_k = min(15, len(distill_df))
+                render_radar_chart(distill_df, top_k=radar_k, cmap_name=cmap, theme=theme)
 
         with distill_tab:
             st.subheader("🔍 Concept Distillation Efficiency")
