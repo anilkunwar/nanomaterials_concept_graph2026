@@ -1,11 +1,3 @@
-        fig.update_layout(
-            title="<b>Nanomaterials Research Domain Hierarchy</b><br><i>Size = concept frequency</i>",
-            font=dict(size=label_size, family="Arial", color=theme["font"] if theme else "#000000"),
-            paper_bgcolor=theme["plotly_paper"] if theme else "#ffffff",
-            plot_bgcolor=theme["bg"] if theme else "#ffffff",
-            width=width, height=height,
-            margin=dict(t=60, b=20, l=20, r=20)
-        )
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
