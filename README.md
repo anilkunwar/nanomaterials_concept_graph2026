@@ -28,3 +28,5 @@
 
 [![integratedllmgraphnanomaterials](https://img.shields.io/badge/nanocg-v4-red)](https://nanomaterials-concept-graph4.streamlit.app/) (More postprocessing on V2, Stable and deterministic layout of graph with Kamada-Kawai (or spring layout for >300 nodes) before passing coordinates to PyVis; Performed the following FIX over V1 -Pre-compute a deterministic layout with NetworkX and either (1) disable physics entirely, or (2) run a long stabilization phase with much higher damping before displaying.)
 
+[![integratedllmgraphnanomaterials](https://img.shields.io/badge/nanocg-v5-red)](https://nanomaterials-concept-graph5.streamlit.app/) (More postprocessing on V2, Stable and deterministic layout of graph with Kamada-Kawai (or spring layout for >300 nodes) before passing coordinates to PyVis; Performed the following FIX over V1 -Pre-compute a deterministic layout with NetworkX and either (1) disable physics entirely, or (2) run a long stabilization phase with much higher damping before displaying.)
+
