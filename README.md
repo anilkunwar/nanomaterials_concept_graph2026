@@ -39,4 +39,9 @@
 
 [![integratedllmgraphnanomaterials](https://img.shields.io/badge/agnpnanocg-v5-red)](https://defect-engineered-ag-nanoparticles-concept-graph1.streamlit.app/) (Builds concept graph on defect engineered Ag nanoparticles)
 
+# Focus on Nanotwinned Copper
+
+[![integratedllmgraphnanomaterials](https://img.shields.io/badge/ntcunanocg-v5-red)](https://nt-cu-via-electrodeposition-concept-graph1.streamlit.app/) (Builds concept graph on electrodeposited nt-Cu)
+
+
 
