@@ -19,6 +19,8 @@
 
 [![integratedllmgraphnanomaterials](https://img.shields.io/badge/agnpcsvtojson-v1a-blue)](https://defect-engineered-ag-nanomaterials-metadata-csv-to-json1a.streamlit.app/) (app for converting the csv metadata A - defect engineered Ag nanoparticles)
 
+[![integratedllmgraphnanomaterials](https://img.shields.io/badge/ntcucsvtojson-v1a-blue)](https://nt-cu-metadata-csv-to-json1.streamlit.app/) (app for converting the csv metadata B - nanotwinned Cu)
+
 
 # Nanomaterials concept graph construction (working)
 
