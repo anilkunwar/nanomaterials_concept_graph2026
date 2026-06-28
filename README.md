@@ -37,11 +37,15 @@
 
 # Focus on Defect Engineered Ag Nanoparticles
 
-[![integratedllmgraphnanomaterials](https://img.shields.io/badge/agnpnanocg-v5-red)](https://defect-engineered-ag-nanoparticles-concept-graph1.streamlit.app/) (Builds concept graph on defect engineered Ag nanoparticles)
+[![integratedllmgraphnanomaterials](https://img.shields.io/badge/agnpnanocg-v5.1-red)](https://defect-engineered-ag-nanoparticles-concept-graph1.streamlit.app/) (Builds concept graph on defect engineered Ag nanoparticles, Keyterms still more generic on al the categories)
+
+[![integratedllmgraphnanomaterials](https://img.shields.io/badge/agnpnanocg-v5.2-red)](https://defect-engineered-ag-nanoparticles-concept-graph2.streamlit.app/) (Builds concept graph on defect engineered Ag nanoparticles, Keyterms made specific to category A)
+
 
 # Focus on Nanotwinned Copper
 
 [![integratedllmgraphnanomaterials](https://img.shields.io/badge/ntcunanocg-v5-red)](https://nt-cu-via-electrodeposition-concept-graph1.streamlit.app/) (Builds concept graph on electrodeposited nt-Cu)
+
 
 # Focus on Cu@Ag Coreshell Nanostructures
 
