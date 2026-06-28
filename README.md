@@ -44,12 +44,16 @@
 
 # Focus on Nanotwinned Copper
 
-[![integratedllmgraphnanomaterials](https://img.shields.io/badge/ntcunanocg-v5-red)](https://nt-cu-via-electrodeposition-concept-graph1.streamlit.app/) (Builds concept graph on electrodeposited nt-Cu)
+[![integratedllmgraphnanomaterials](https://img.shields.io/badge/ntcunanocg-v5.1-red)](https://nt-cu-via-electrodeposition-concept-graph1.streamlit.app/) (Builds concept graph on electrodeposited nt-Cu, Keyterms still more generic on al the categories)
+
+[![integratedllmgraphnanomaterials](https://img.shields.io/badge/ntcunanocg-v5.2-red)](https://nt-cu-via-electrodeposition-concept-graph2.streamlit.app/) (Builds concept graph on electrodeposited nt-Cu,  Keyterms made specific to category B)
 
 
 # Focus on Cu@Ag Coreshell Nanostructures
 
-[![integratedllmgraphnanomaterials](https://img.shields.io/badge/coreshellnanocg-v5-red)](https://coreshell-structures-concept-graph1.streamlit.app/) (Builds concept graph on Cu@Ag coreshell nanostructures)
+[![integratedllmgraphnanomaterials](https://img.shields.io/badge/coreshellnanocg-v5.1-red)](https://coreshell-structures-concept-graph1.streamlit.app/) (Builds concept graph on Cu@Ag coreshell nanostructures, Keyterms still more generic on al the categories)
+
+[![integratedllmgraphnanomaterials](https://img.shields.io/badge/coreshellnanocg-v5.2-red)](https://coreshell-structures-concept-graph2.streamlit.app/) (Builds concept graph on Cu@Ag coreshell nanostructures,  Keyterms made specific to category C)
 
 
 
