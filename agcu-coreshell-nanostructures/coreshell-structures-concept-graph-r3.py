@@ -921,6 +921,8 @@ def compute_research_direction_scores(model, node_features, final_emb, nx_graph,
         gnn_logits = model.decoder(pair_features).squeeze(1)
         gnn_scores = torch.sigmoid(gnn_logits).numpy()
     emb_np = embed_model.encode(valid_concepts, show_progress_bar=False, batch_size=64)
+    if len(emb_np) == 0:
+        return pd.DataFrame()
     cos_sims = np.sum(emb_np[u_tensor.numpy()] * emb_np[v_tensor.numpy()], axis=1)
     results = []
     for i, (u_idx, v_idx, u_c, v_c) in enumerate(candidate_pairs):
@@ -952,7 +954,7 @@ def compute_research_direction_scores(model, node_features, final_emb, nx_graph,
 # ==============================================================================
 def validate_graph_metrics(nx_graph: nx.Graph, valid_concepts: List[str]) -> Dict[str, Any]:
     metrics = {}
-    if nx_graph.number_of_nodes() < 3:
+    if nx_graph.number_of_nodes() < 3 or not valid_concepts:
         return metrics
     try:
         from networkx.algorithms import community
@@ -1029,7 +1031,7 @@ def detect_keyword_bursts(df_filtered, concept_abstract_map, valid_concepts, yea
     if df_years.empty:
         return pd.DataFrame()
 
-    years = sorted(df_years[year_col].unique())
+    years = sorted([y for y in df_years[year_col].unique() if pd.notna(y)])
     if len(years) < 3:
         return pd.DataFrame()
 
@@ -1196,6 +1198,15 @@ def detect_semantic_drift(valid_concepts, concept_abstract_map, all_texts, embed
     if df_years.empty or len(df_years) < 10:
         return pd.DataFrame()
 
+    # Ensure we have enough concepts with year data
+    year_concepts = 0
+    for concept in valid_concepts:
+        abs_list = concept_abstract_map.get(concept, [])
+        if any(idx in abs_year for idx in abs_list):
+            year_concepts += 1
+    if year_concepts < 3:
+        return pd.DataFrame()
+
     median_year = df_years[year_col].median()
     abs_year = {i: y for i, y in df_years[year_col].items() if i < len(df_filtered)}
 
@@ -1238,7 +1249,7 @@ def build_concept_genealogy(nx_graph, valid_concepts, concept_abstract_map):
     Build a concept genealogy by tracing shortest paths and identifying parent-child
     relationships based on frequency and connectivity patterns.
     """
-    if nx_graph.number_of_nodes() < 3:
+    if nx_graph.number_of_nodes() < 3 or not valid_concepts:
         return pd.DataFrame()
 
     genealogy = []
@@ -1619,6 +1630,9 @@ def render_graph_pyvis(nx_graph, concept_abstract_map, physics_enabled=True,
         degrees = dict(nx_graph.degree(weight='weight'))
         top_nodes = sorted(degrees.keys(), key=lambda x: degrees[x], reverse=True)[:top_n_nodes]
         nx_graph = nx_graph.subgraph(top_nodes).copy()
+    if len(nx_graph.nodes()) == 0:
+        st.info("No nodes to display in graph.")
+        return
 
     if theme is None:
         theme = THEME_PRESETS["Bright (Default)"]
@@ -1815,6 +1829,9 @@ def render_graph_plotly_2d(nx_graph, concept_abstract_map, cmap_name="viridis",
         degrees = dict(nx_graph.degree())
         top_nodes = sorted(degrees.keys(), key=lambda x: degrees[x], reverse=True)[:top_n_nodes]
         nx_graph = nx_graph.subgraph(top_nodes).copy()
+    if len(nx_graph.nodes()) == 0:
+        st.info("No nodes to display.")
+        return
     pos = nx.spring_layout(nx_graph, k=1.5, iterations=50, seed=42)
     cmap_colors = get_colormap_colors(cmap_name, len(nx_graph.nodes()))
     edge_x, edge_y, edge_hover = [], [], []
@@ -1866,6 +1883,9 @@ def render_graph_plotly_3d(nx_graph, concept_abstract_map, cmap_name="viridis", 
         degrees = dict(nx_graph.degree())
         top_nodes = sorted(degrees.keys(), key=lambda x: degrees[x], reverse=True)[:top_n_nodes]
         nx_graph = nx_graph.subgraph(top_nodes).copy()
+    if len(nx_graph.nodes()) == 0:
+        st.info("No nodes to display.")
+        return
     pos_3d = nx.spring_layout(nx_graph, dim=3, seed=42)
     cmap_colors = get_colormap_colors(cmap_name, len(nx_graph.nodes()))
     edge_x, edge_y, edge_z = [], [], []
@@ -1900,6 +1920,9 @@ def render_graph_plotly_3d(nx_graph, concept_abstract_map, cmap_name="viridis", 
 def render_graph_fallback(nx_graph, concept_abstract_map, theme=None):
     if theme is None:
         theme = THEME_PRESETS["Bright (Default)"]
+    if len(nx_graph.nodes()) == 0:
+        st.info("No graph data to display.")
+        return
     st.markdown(f"### 📊 Graph Summary (Text View)")
     st.markdown(f"- **Nodes**: {len(nx_graph.nodes())}")
     st.markdown(f"- **Edges**: {len(nx_graph.edges())}")
@@ -1953,12 +1976,15 @@ def render_timeline(df_filtered, concept_abstract_map, valid_concepts, year_col=
         for y in years:
             data.append({'concept': concept, 'year': y, 'count': year_dict.get(y, 0)})
     df_timeline = pd.DataFrame(data)
-    if df_timeline.empty:
+    if df_timeline.empty or df_timeline['count'].sum() == 0:
         st.info("No timeline data.")
         return
 
     total_freq = df_timeline.groupby('concept')['count'].sum().sort_values(ascending=False)
-    top_k = st.slider("Select top K concepts for timeline", 3, min(30, len(total_freq)), 10, key='timeline_k')
+    if len(total_freq) == 0:
+        st.info("No concept frequency data for timeline.")
+        return
+    top_k = st.slider("Select top K concepts for timeline", 3, min(30, len(total_freq)), min(10, len(total_freq)), key='timeline_k')
     top_concepts = total_freq.head(top_k).index.tolist()
     df_plot = df_timeline[df_timeline['concept'].isin(top_concepts)]
 
@@ -1988,6 +2014,9 @@ def render_cooccurrence_heatmap(nx_graph, valid_concepts, concept_abstract_map, 
                 v_abs = set(concept_abstract_map.get(v, []))
                 matrix[i,j] = len(u_abs & v_abs)
 
+    if matrix.max() == 0:
+        st.info("No co-occurrence data for heatmap.")
+        return
     fig = px.imshow(matrix, x=top_concepts, y=top_concepts,
                     title='Co-occurrence Heatmap (Top Concepts)',
                     color_continuous_scale='Blues',
@@ -2012,13 +2041,18 @@ def render_tsne_projection(valid_concepts, embed_model, concept_abstract_map, cm
             'concept': valid_concepts, 'x': coords[:,0], 'y': coords[:,1],
             'category': categories, 'frequency': freqs
         })
+        # Clean any NaN/inf values
+        df_tsne = df_tsne.replace([np.inf, -np.inf], np.nan).dropna()
+        if df_tsne.empty:
+            st.info("t-SNE produced no valid data.")
+            return
         unique_cats = df_tsne['category'].unique()
-        fig = px.scatter(df_tsne, x='x', y='y', color='category', size='frequency',
-                         hover_name='concept',
-                         title='t-SNE Projection of Concept Embeddings',
-                         labels={'x':'t-SNE 1', 'y':'t-SNE 2'},
-                         size_max=20,
-                         color_discrete_sequence=get_colormap_colors(cmap_name, len(unique_cats)))
+    fig = px.scatter(df_tsne, x='x', y='y', color='category', size='frequency',
+                     hover_name='concept',
+                     title='t-SNE Projection of Concept Embeddings',
+                     labels={'x':'t-SNE 1', 'y':'t-SNE 2'},
+                     size_max=20,
+                     color_discrete_sequence=get_colormap_colors(cmap_name, max(1, len(unique_cats))))
         st.plotly_chart(fig, use_container_width=True)
     except Exception as e:
         st.error(f"t-SNE failed: {e}")
@@ -2026,8 +2060,8 @@ def render_tsne_projection(valid_concepts, embed_model, concept_abstract_map, cm
 
 def render_community_detection(nx_graph, valid_concepts):
     """Detect communities and visualize with distinct colors."""
-    if nx_graph.number_of_nodes() < 3:
-        st.info("Graph too small for community detection.")
+    if nx_graph.number_of_nodes() < 5:
+        st.info("Graph too small for community detection (need ≥5 nodes).")
         return
     try:
         from networkx.algorithms import community
@@ -2037,9 +2071,13 @@ def render_community_detection(nx_graph, valid_concepts):
             for node in comm:
                 comm_map[node] = i
         G = nx_graph.copy()
-        colors = get_colormap_colors('tab20', len(comms))
+        colors = get_colormap_colors('tab20', max(1, len(comms)))
         node_colors = [colors[comm_map.get(n, 0) % len(colors)] for n in G.nodes()]
-        pos = nx.spring_layout(G, seed=42)
+        try:
+            pos = nx.spring_layout(G, seed=42)
+        except Exception:
+            st.error("Could not compute layout for community visualization.")
+            return
         fig, ax = plt.subplots(figsize=(12,10))
         nx.draw(G, pos, node_color=node_colors, with_labels=True, ax=ax,
                 node_size=400, font_size=8, edge_color='gray', alpha=0.7)
@@ -2086,9 +2124,9 @@ def render_concept_growth(df_filtered, concept_abstract_map, valid_concepts, yea
         early_count = sum(year_counts.get(y, 0) for y in range(int(min_year), int(min_year)+2))
         late_count = sum(year_counts.get(y, 0) for y in range(int(max_year)-1, int(max_year)+1))
         if early_count == 0 and late_count == 0:
-            growth = 0
+            growth = 0.0
         else:
-            growth = (late_count - early_count) / (early_count + 1)
+            growth = float(late_count - early_count) / max(early_count + 1, 1)
         total = len(years)
         growth_data.append({'concept': concept, 'growth': growth, 'total': total})
 
@@ -2110,26 +2148,33 @@ def render_bubble_chart(valid_concepts, concept_abstract_map, nx_graph):
         return
     freq = [len(concept_abstract_map.get(c, [])) for c in valid_concepts]
     degree = [nx_graph.degree(c) for c in valid_concepts]
-    eff = [f * np.log1p(d) for f, d in zip(freq, degree)]
+    # Ensure efficiency is always positive for Plotly size scaling
+    eff = [max(0.1, f * np.log1p(max(d, 0.1))) for f, d in zip(freq, degree)]
     categories = [abstract_concepts_to_categories([c]).get(c, 'general') for c in valid_concepts]
     df_bubble = pd.DataFrame({
         'concept': valid_concepts, 'frequency': freq, 'degree': degree,
         'efficiency': eff, 'category': categories
     })
-    unique_cats = df_bubble['category'].unique()
+    # Drop any rows with NaN/inf that could break Plotly
+    df_bubble = df_bubble.replace([np.inf, -np.inf], np.nan).dropna()
+    if df_bubble.empty:
+        st.info("Not enough data for bubble chart.")
+        return
+    n_cats = len(df_bubble['category'].unique())
     fig = px.scatter(df_bubble, x='degree', y='frequency', size='efficiency',
                      color='category', hover_name='concept',
                      title='Concept Landscape: Degree vs Frequency',
                      labels={'degree':'Degree (connectivity)', 'frequency':'Abstract Frequency'},
                      size_max=30,
-                     color_discrete_sequence=get_colormap_colors('viridis', len(unique_cats)))
+                     color_discrete_sequence=get_colormap_colors('viridis', max(1, n_cats)))
     st.plotly_chart(fig, use_container_width=True)
 
 
 def render_degree_distribution(nx_graph):
     """Plot degree distribution with power-law fit."""
     degrees = [d for n, d in nx_graph.degree()]
-    if not degrees:
+    if not degrees or max(degrees) == 0:
+        st.info("No degree data available.")
         return
 
     fig = make_subplots(rows=1, cols=2, subplot_titles=("Degree Distribution", "Log-Log Degree Distribution"))
@@ -2159,6 +2204,9 @@ def render_centrality_comparison(nx_graph, valid_concepts, concept_abstract_map)
         betweenness_cent = nx.betweenness_centrality(nx_graph, normalized=True, k=min(100, nx_graph.number_of_nodes()))
         closeness_cent = nx.closeness_centrality(nx_graph)
         eigenvector_cent = nx.eigenvector_centrality(nx_graph, max_iter=1000)
+        if not eigenvector_cent:
+            st.info("Eigenvector centrality could not be computed.")
+            return
 
         df_cent = pd.DataFrame({
             'concept': list(nx_graph.nodes()),
@@ -2196,6 +2244,8 @@ def render_centrality_comparison(nx_graph, valid_concepts, concept_abstract_map)
 # ==============================================================================
 def build_category_hierarchy(valid_concepts: List[str], concept_abstract_map: Dict, top_n_per_category: int = 40,
                              categories_filter=None):
+    if not valid_concepts:
+        return [], [], []
     hierarchy = defaultdict(lambda: {"children": [], "count": 0})
     category_map = abstract_concepts_to_categories(valid_concepts)
     for concept in valid_concepts:
@@ -2225,6 +2275,8 @@ def render_sunburst_chart(labels, parents, values, cmap_name="viridis", label_si
     if not labels or len(labels) < 2:
         st.info("Not enough categories for sunburst chart.")
         return
+    # Ensure all values are positive for sunburst
+    values = [max(0.1, float(v)) if v is not None else 0.1 for v in values]
     n_items = len(labels)
     use_remainder = n_items > 80
     unique_ids = []; seen = {}
@@ -2268,7 +2320,7 @@ def render_sunburst_chart(labels, parents, values, cmap_name="viridis", label_si
 
 
 def render_radar_chart(concept_scores_df: pd.DataFrame, top_k: int = 15, cmap_name: str = "viridis", theme=None):
-    if concept_scores_df.empty or len(concept_scores_df) < 2:
+    if concept_scores_df is None or concept_scores_df.empty or len(concept_scores_df) < 2:
         st.info("Not enough concepts for radar chart.")
         return
     metrics = ['frequency', 'semantic_density', 'coherence_score', 'distillation_efficiency']
@@ -2383,11 +2435,12 @@ def export_graph(nx_graph, concept_abstract_map, format_type: str):
 def compute_graph_metrics(G: nx.Graph) -> dict:
     if G.number_of_nodes() == 0:
         return {}
+    degrees = [d for _, d in G.degree()]
     metrics = {
         "nodes": G.number_of_nodes(),
         "edges": G.number_of_edges(),
         "density": nx.density(G),
-        "avg_degree": np.mean([d for _, d in G.degree()]),
+        "avg_degree": np.mean(degrees) if degrees else 0,
         "clustering": nx.average_clustering(G) if G.number_of_nodes() > 2 else 0,
         "connected_components": nx.number_connected_components(G),
         "avg_clustering": nx.average_clustering(G) if G.number_of_nodes() > 2 else 0
@@ -2966,7 +3019,8 @@ def main():
             st.subheader("🌐 Interactive Concept Graph")
             if nx_graph.number_of_nodes() == 0:
                 st.warning("No nodes to display.")
-            elif nx_graph.number_of_edges() == 0:
+                return
+            elif nx_graph.number_of_edges() == 0 and len(valid_concepts) > 1:
                 st.warning("No edges — building semantic fallback")
                 nx_graph = nx.complete_graph(len(valid_concepts))
                 nx_graph = nx.relabel_nodes(nx_graph, {i: valid_concepts[i] for i in range(len(valid_concepts))})
@@ -3009,13 +3063,17 @@ def main():
             with st.expander("📡 Concept Radar"):
                 radar_k = st.session_state.get('top_n_radar', 15)
                 if radar_k == 0:
-                    radar_k = min(15, len(distill_df))
-                render_radar_chart(distill_df, top_k=radar_k, cmap_name=cmap, theme=theme)
+                    radar_k = min(15, len(distill_df)) if not distill_df.empty else 0
+                if radar_k > 0 and not distill_df.empty:
+                    render_radar_chart(distill_df, top_k=radar_k, cmap_name=cmap, theme=theme)
+                else:
+                    st.info("Not enough data for radar chart.")
 
         with distill_tab:
             st.subheader("🔍 Concept Distillation Efficiency")
-            top_n = st.slider("Show Top N", 10, min(200, len(distill_df)), 50, key="distill_top_n")
-            display_df = distill_df.head(top_n)
+            top_n = st.slider("Show Top N", 10, min(200, len(distill_df)) if not distill_df.empty else 10, 
+                              min(50, len(distill_df)) if not distill_df.empty else 10, key="distill_top_n")
+            display_df = distill_df.head(top_n) if not distill_df.empty else pd.DataFrame()
             st.dataframe(display_df, use_container_width=True)
             st.markdown("**📈 Efficiency vs Frequency:**")
             chart_df = display_df.set_index('concept')[['distillation_efficiency']]
@@ -3029,7 +3087,7 @@ def main():
 
         with scores_tab:
             st.subheader("🎯 Top Research Direction Recommendations")
-            if top_scores.empty:
+            if top_scores is None or top_scores.empty:
                 st.info("No novel pairs scored. The graph may be too dense or too sparse.")
             else:
                 st.write(f"Top {len(top_scores)} novel concept pairs:")
@@ -3049,13 +3107,15 @@ def main():
             col2.metric("Silhouette", f"{val_metrics.get('silhouette_score', 0):.3f}")
             col3.metric("Communities", val_metrics.get('n_communities', 0))
             col4.metric("Significant Edges", val_metrics.get('edge_significant_count', 0))
-            if not top_scores.empty:
+            if top_scores is not None and not top_scores.empty and 'composite_score' in top_scores.columns:
                 n_boot = st.session_state.get('bootstrap_samples', 500)
                 alpha = st.session_state.get('alpha_level', 0.05)
                 mean_score, ci_low, ci_high = compute_bootstrap_ci(
                     top_scores['composite_score'].values, n_bootstrap=n_boot, alpha=alpha
                 )
                 st.success(f"🎯 Composite Score: `{mean_score:.3f}` | {int((1-alpha)*100)}% CI: `[{ci_low:.3f}, {ci_high:.3f}]`")
+            else:
+                st.info("No composite scores available for bootstrap CI.")
             X_feat, y_target = [], []
             for u, v in nx_graph.edges():
                 pu, pv = data["concept_properties"].get(u, 0), data["concept_properties"].get(v, 0)
@@ -3075,6 +3135,8 @@ def main():
             st.subheader("🌟 Innovative Visualizations for Core-Shell Ag-Cu Concepts")
 
             df_filtered = data.get('df_filtered', pd.DataFrame())
+            if df_filtered.empty:
+                st.info("No filtered dataframe available for temporal visualizations.")
 
             if not df_filtered.empty and 'Year' in df_filtered.columns:
                 with st.expander("📅 Concept Timeline (Yearly Trends)", expanded=True):
@@ -3109,7 +3171,7 @@ def main():
 
             with st.expander("💥 Keyword Burst Detection"):
                 burst_df = data.get('burst_df', pd.DataFrame())
-                if not burst_df.empty:
+                if burst_df is not None and not burst_df.empty:
                     st.dataframe(burst_df.head(20), use_container_width=True)
                     fig = px.bar(burst_df.head(20), x='concept', y='burst_score',
                                 color='max_consecutive',
@@ -3122,7 +3184,7 @@ def main():
 
             with st.expander("🌉 Cross-Domain Bridge Detection"):
                 bridge_df = data.get('bridge_df', pd.DataFrame())
-                if not bridge_df.empty:
+                if bridge_df is not None and not bridge_df.empty:
                     st.dataframe(bridge_df.head(20), use_container_width=True)
                     fig = px.scatter(bridge_df, x='betweenness', y='category_diversity',
                                     size='neighbor_count', color='own_category',
@@ -3134,7 +3196,7 @@ def main():
 
             with st.expander("🧬 Network Motif Analysis"):
                 motif_data = data.get('motif_data', {})
-                if motif_data:
+                if motif_data and isinstance(motif_data, dict):
                     cols = st.columns(4)
                     cols[0].metric("Triangles", motif_data.get('triangles', 0))
                     cols[1].metric("Star Nodes", motif_data.get('stars', 0))
@@ -3153,7 +3215,7 @@ def main():
 
             with st.expander("🔄 Semantic Drift Detection"):
                 drift_df = data.get('drift_df', pd.DataFrame())
-                if not drift_df.empty:
+                if drift_df is not None and not drift_df.empty:
                     st.dataframe(drift_df.head(20), use_container_width=True)
                     fig = px.bar(drift_df.head(20), x='concept', y='semantic_drift',
                                 color='late_count',
@@ -3166,7 +3228,7 @@ def main():
 
             with st.expander("👨‍👩‍👧 Concept Genealogy"):
                 genealogy_df = data.get('genealogy_df', pd.DataFrame())
-                if not genealogy_df.empty:
+                if genealogy_df is not None and not genealogy_df.empty:
                     st.dataframe(genealogy_df[['concept', 'generation', 'n_parents', 'n_children', 'n_siblings', 'frequency']].head(20),
                                 use_container_width=True)
                     fig = px.scatter(genealogy_df, x='generation', y='frequency',
@@ -3220,10 +3282,13 @@ def main():
                     st.download_button(f"💾 Save {fig_format}", data=fig_bytes,
                                       file_name=f"nano_graph_{fig_type}.{ext}", mime=mime)
 
+            if not valid_concepts:
+                st.warning("No concepts to export.")
+                return
             concept_list_df = pd.DataFrame({
                 'concept': valid_concepts,
                 'frequency': [len(concept_abstract_map.get(c, [])) for c in valid_concepts],
-                'degree': [nx_graph.degree(c) for c in valid_concepts],
+                'degree': [nx_graph.degree(c) if c in nx_graph else 0 for c in valid_concepts],
                 'category': [abstract_concepts_to_categories([c]).get(c, 'general') for c in valid_concepts]
             })
             csv_concepts = concept_list_df.to_csv(index=False).encode('utf-8')
