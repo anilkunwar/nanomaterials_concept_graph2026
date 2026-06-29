@@ -1,27 +1,30 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-Nanomaterials-ConceptGraph: Concept Graph Builder for Defect-Engineered Ag Nanoparticles & Applications
-==================================================================================
-Large-corpus concept graph extraction (3000+ abstracts) from JSON metadata.
-No seed injection needed — robust statistical methods for high-volume data.
-
+================================================================================
+NanoGraph-Explorer: Advanced Concept Graph Analytics for Core-Shell Ag-Cu Nanostructures
+================================================================================
+A publication-ready, large-corpus concept graph extraction and visualization platform
+for nanomaterials literature mining. Optimized for core-shell Ag-Cu nanostructures
+with plasmonic, catalytic, and interfacial engineering focus.
+Version: 2.0 (Enhanced Publication Edition)
 Features:
-- Robust JSON/JSONL/CSV loading with BOM handling and error recovery
-- Large-corpus optimized concept extraction (TF-IDF, semantic clustering, PageRank)
-- Defect-Ag focused domain filtering (ISF, EST, twins, SERS, catalysis, sensing, etc.)
-- Interactive PyVis/Plotly 2D/3D visualizations with 50+ colormaps
-- Statistical validation: modularity, silhouette, centrality, bootstrap CIs
-- GNN-powered (GraphSAGE) research direction scoring with PyTorch
-- Export: GraphML, JSON, CSV, HTML, SVG, PNG
-- Streamlit UI with session persistence and crash prevention
-
+- Robust multi-format data ingestion (JSON/JSONL/CSV/XML/BIB) with BOM handling
+- Domain-specific concept extraction with semantic clustering and TF-IDF weighting
+- Hybrid graph construction (co-occurrence + semantic similarity + temporal edges)
+- GraphSAGE-powered GNN for research direction scoring
+- Interactive graph editing with undo/redo, merge/split, filter operations
+- Multi-scale analysis: micro (node-level), meso (community), macro (temporal)
+- Publication-quality visualizations: PyVis, Plotly 2D/3D, Matplotlib, NetworkX
+- Advanced analytics: t-SNE, UMAP, community detection, keyword burst detection
+- Temporal evolution: concept timeline, growth rates, semantic drift
+- Cross-domain bridge detection and network motif analysis
+- Automated report generation with statistical validation
+- Export: GraphML, GEXF, JSON, CSV, HTML, SVG, PNG (300 DPI), LaTeX tables
 DEPLOYMENT:
 pip install streamlit torch transformers sentence-transformers networkx scikit-learn
-pip install pyvis plotly pandas numpy kaleido matplotlib scipy seaborn
-
-Run: streamlit run nanomaterials_concept_graph.py
-
+pip install pyvis plotly pandas numpy kaleido matplotlib scipy seaborn umap-learn
+Run: streamlit run nanomaterials_concept_graph_v2.py
 Place JSON files in ./json_metadatabase/ folder next to this script.
 """
 import streamlit as st
@@ -42,32 +45,33 @@ import warnings
 import traceback
 import gc
 import hashlib
-from collections import defaultdict, Counter
+import copy
+from collections import defaultdict, Counter, deque
 from datetime import datetime
-from typing import List, Dict, Optional, Tuple, Union, Any
+from typing import List, Dict, Optional, Tuple, Union, Any, Callable
 from pathlib import Path
-
-from sklearn.linear_model import Ridge
-from sklearn.cluster import AgglomerativeClustering
+from sklearn.linear_model import Ridge, LogisticRegression
+from sklearn.cluster import AgglomerativeClustering, KMeans
 from sklearn.metrics.pairwise import cosine_similarity
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics import silhouette_score, r2_score, mean_absolute_error, mean_squared_error
-from sklearn.metrics import davies_bouldin_score, pairwise_distances
-from sklearn.decomposition import PCA
+from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
+from sklearn.metrics import (silhouette_score, r2_score, mean_absolute_error,
+                             mean_squared_error, adjusted_rand_score)
+from sklearn.decomposition import PCA, LatentDirichletAllocation
+from sklearn.manifold import TSNE
 from scipy import stats
-from scipy.stats import pearsonr, spearmanr
-from scipy.spatial.distance import pdist, squareform
-
+from scipy.stats import pearsonr, spearmanr, entropy
+from scipy.spatial.distance import pdist, squareform, cosine
+from scipy.cluster.hierarchy import linkage, dendrogram
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import matplotlib.colors
 import matplotlib.patches as mpatches
+from matplotlib.patches import FancyBboxPatch, Circle
+import matplotlib.gridspec as gridspec
 import seaborn as sns
-
 from sentence_transformers import SentenceTransformer
-from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 from pyvis.network import Network
 import plotly.graph_objects as go
 import plotly.express as px
@@ -75,26 +79,28 @@ from plotly.subplots import make_subplots
 
 warnings.filterwarnings('ignore')
 
-# ==========================================
+# ==============================================================================
 # PAGE CONFIGURATION
-# ==========================================
+# ==============================================================================
 st.set_page_config(
-    page_title="Nanomaterials-ConceptGraph: Defect-Engineered Ag Explorer",
+    page_title="NanoGraph-Explorer: Core-Shell Ag-Cu Nanostructure Analytics",
     page_icon="🔬",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# ==========================================
+# ==============================================================================
 # PATHS & DIRECTORIES
-# ==========================================
+# ==============================================================================
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 JSON_METADATA_DIR = os.path.join(SCRIPT_DIR, "json_metadatabase")
+EXPORT_DIR = os.path.join(SCRIPT_DIR, "exports")
 os.makedirs(JSON_METADATA_DIR, exist_ok=True)
+os.makedirs(EXPORT_DIR, exist_ok=True)
 
-# ==========================================
+# ==============================================================================
 # COLORMAP REGISTRY (50+)
-# ==========================================
+# ==============================================================================
 SUPPORTED_COLORMAPS = {
     "viridis": "Viridis", "plasma": "Plasma", "inferno": "Inferno", "magma": "Magma",
     "cividis": "Cividis", "turbo": "Turbo", "jet": "Jet", "rainbow": "Rainbow",
@@ -111,8 +117,16 @@ SUPPORTED_COLORMAPS = {
     "gist_earth": "GistEarth", "terrain": "Terrain", "ocean": "Ocean"
 }
 
+PUBLICATION_COLORMAPS = {
+    "Nature Style": {"cmap": "viridis", "bg": "#ffffff", "grid": "#e8e8e8"},
+    "Science Style": {"cmap": "plasma", "bg": "#ffffff", "grid": "#f0f0f0"},
+    "Dark Presentation": {"cmap": "turbo", "bg": "#1a1a2e", "grid": "#2d2d44"},
+    "ACS Nano Style": {"cmap": "cividis", "bg": "#ffffff", "grid": "#e8e8e8"},
+    "High Contrast": {"cmap": "nipy_spectral", "bg": "#ffffff", "grid": "#d0d0d0"}
+}
+
 def get_colormap_colors(cmap_name: str, n: int) -> List[str]:
-    """Convert matplotlib colormap to list of hex colors for Plotly/PyVis"""
+    """Convert matplotlib colormap to list of hex colors for Plotly/PyVis."""
     try:
         cmap = matplotlib.colormaps.get_cmap(cmap_name).resampled(n)
         return [matplotlib.colors.to_hex(cmap(i)) for i in range(n)]
@@ -127,26 +141,32 @@ def get_colormap_colors(cmap_name: str, n: int) -> List[str]:
                 cmap = cm.get_cmap("viridis", n)
             return [matplotlib.colors.to_hex(cmap(i)) for i in range(n)]
 
-# ==========================================
-# ROBUST JSON LOADER
-# ==========================================
+# ==============================================================================
+# ROBUST MULTI-FORMAT DATA LOADER
+# ==============================================================================
 def robust_load_file(filepath: Path):
-    """Try multiple strategies to load a file that claims to be JSON."""
+    """Try multiple strategies to load a file (JSON/JSONL/CSV/XML/BIB)."""
     text = filepath.read_text(encoding="utf-8-sig")
     if not text.strip():
         raise ValueError(f"File is empty (0 bytes or only whitespace).")
+    
+    # Try JSON
     try:
         return json.loads(text)
     except json.JSONDecodeError:
         pass
-    sanitized = re.sub(r'\bNaN\b', 'null', text)
-    sanitized = re.sub(r'\bInfinity\b', 'null', sanitized)
+    
+    # Sanitize common JSON issues
+    sanitized = re.sub(r'NaN', 'null', text)
+    sanitized = re.sub(r'Infinity', 'null', sanitized)
     sanitized = re.sub(r'-Infinity', 'null', sanitized)
     sanitized = re.sub(r',(\s*[}\]])', r'\1', sanitized)
     try:
         return json.loads(sanitized)
     except json.JSONDecodeError:
         pass
+    
+    # Try JSONL (one JSON per line)
     records = []
     for line in text.splitlines():
         line = line.strip()
@@ -158,20 +178,44 @@ def robust_load_file(filepath: Path):
             pass
     if records:
         return records
+    
+    # Try CSV
     try:
         df = pd.read_csv(filepath)
         return df.to_dict(orient="records")
     except Exception:
         pass
+    
+    # Try TSV
+    try:
+        df = pd.read_csv(filepath, sep='\t')
+        return df.to_dict(orient="records")
+    except Exception:
+        pass
+    
+    # Try BibTeX-like parsing (basic)
+    bib_records = []
+    entries = re.findall(r'@\w+\s*\{([^}]+)\}', text, re.DOTALL)
+    if entries:
+        for entry in entries:
+            fields = re.findall(r'(\w+)\s*=\s*\{([^}]+)\}', entry)
+            if fields:
+                bib_records.append(dict(fields))
+    if bib_records:
+        return bib_records
+    
     preview = text[:300]
     raise ValueError(f"Could not parse {filepath.name}. First 200 chars: {preview[:200]}...")
 
 @st.cache_data(show_spinner=False)
 def load_all_json_files(directory):
-    """Load every .json file in directory and return a list of (filepath, records)."""
-    files = sorted(Path(directory).glob("*.json"))
+    """Load every supported file in directory and return list of (filepath, records)."""
+    files = []
+    for ext in ['*.json', '*.jsonl', '*.csv', '*.tsv', '*.bib']:
+        files.extend(sorted(Path(directory).glob(ext)))
     if not files:
         return []
+    
     loaded = []
     for fp in files:
         try:
@@ -195,7 +239,7 @@ def load_all_json_files(directory):
 
 @st.cache_data(show_spinner=False)
 def build_master_dataframe(file_records):
-    """Flatten all records into one DataFrame."""
+    """Flatten all records into one DataFrame with rich metadata."""
     rows = []
     for fname, records in file_records:
         for rec in records:
@@ -203,132 +247,193 @@ def build_master_dataframe(file_records):
                 continue
             rec = dict(rec)
             rec["_source_file"] = fname
+            rec["_ingestion_time"] = datetime.now().isoformat()
             rows.append(rec)
     if not rows:
         return pd.DataFrame()
+    
     df = pd.json_normalize(rows)
     df = df.replace({float("nan"): pd.NA, None: pd.NA, "NaN": pd.NA, "": pd.NA})
-    if "Year" in df.columns:
-        df["Year"] = pd.to_numeric(df["Year"], errors="coerce")
+    
+    # Auto-detect and normalize year columns
+    year_cols = [c for c in df.columns if 'year' in c.lower() or 'date' in c.lower()]
+    for col in year_cols:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    
+    # Auto-detect DOI
+    doi_cols = [c for c in df.columns if 'doi' in c.lower()]
     return df
 
-# ==========================================
-# DEFECT-ENGINEERED AG DOMAIN CONFIGURATION
-# ==========================================
-# Core materials of interest
+# ==============================================================================
+# CORE-SHELL AG-CU DOMAIN CONFIGURATION
+# ==============================================================================
 CORE_MATERIALS = [
-    "defect engineered silver", "defect engineered ag", "defective ag nanoparticle", "defective silver nanoparticle",
-    "twinned ag nanoparticle", "twinned silver nanoparticle", "nanotwinned ag", "nanotwinned silver",
-    "stacking faulted ag", "stacking faulted silver", "ag nanoparticle with isf", "ag nanoparticle with est",
-    "intrinsic stacking fault ag", "extrinsic stacking fault ag", "isf ag", "est ag",
-    "point defect ag", "vacancy rich ag", "dislocation rich ag", "ag nanocrystal defect",
-    "silver nanowire defect", "ag nanostructure defect", "defect rich silver", "defect rich ag"
+    "cu@ag", "ag@cu", "cu ag core shell", "ag cu core shell",
+    "core shell copper silver", "core shell silver copper",
+    "cu@ag core shell", "ag@cu core shell",
+    "copper silver core shell", "silver copper core shell",
+    "cu ag nanoparticle", "ag cu nanoparticle", "copper silver nanoparticle",
+    "cu ag bimetallic", "ag cu bimetallic", "copper silver bimetallic",
+    "cu/ag core shell", "ag/cu core shell",
+    "cu ag nanostructure", "ag cu nanostructure",
+    "cu ag nanowire", "ag cu nanowire", "cu ag nanorod",
+    "cu ag nanocrystal", "ag cu nanocrystal",
+    "cu ag nanocomposite", "ag cu nanocomposite",
+    "silver coated copper", "copper coated silver",
+    "cu@ag core-shell", "ag@cu core-shell"
 ]
 
-# Physicochemical properties (Replacing bulk mechanical properties)
-PHYSICOCHEMICAL_PROPERTIES = [
-    "defect formation energy", "stacking fault energy", "sfe", "surface energy", "cohesive energy",
-    "binding energy", "adsorption energy", "activation energy", "d-band center",
-    "melting point", "thermal stability", "structural stability", "coalescence",
+MATERIAL_PROPERTIES = [
+    "lattice mismatch", "misfit strain", "interfacial strain", "coherency strain",
+    "critical shell thickness", "epitaxial growth", "heteroepitaxy",
+    "interfacial diffusion", "interdiffusion", "kirkendall effect", "void formation",
+    "shell thickness", "core diameter", "core size", "shell volume",
     "surface plasmon resonance", "spr", "localized surface plasmon resonance", "lspr",
-    "plasmon peak", "extinction coefficient", "absorption cross section", "hot spot",
-    "enhancement factor", "sers efficiency", "catalytic activity", "turnover frequency", "tof",
-    "overpotential", "current density", "onset potential", "exchange current density",
-    "band gap", "work function", "fermi level", "schottky barrier",
-    "antibacterial activity", "minimum inhibitory concentration", "mic", "cytotoxicity"
+    "plasmon peak", "extinction coefficient", "absorption cross section",
+    "catalytic activity", "electrocatalysis", "surface enhanced raman scattering", "sers",
+    "enhancement factor", "hot spots", "electromagnetic enhancement",
+    "electrical conductivity", "sheet resistance", "contact resistance", "resistivity",
+    "thermal conductivity", "thermal stability", "oxidation resistance", "corrosion resistance",
+    "antibacterial activity", "antimicrobial", "cytotoxicity", "biocompatibility",
+    "work function", "band gap", "fermi level", "schottky barrier",
+    "surface energy", "wettability", "hydrophobicity", "sers substrate",
+    "refractive index", "dielectric function", "extinction spectrum"
 ]
 
-# Synthesis and defect introduction
 SYNTHESIS_METHODS = [
-    "chemical reduction", "polyol method", "seed mediated growth", "seed-mediated",
-    "galvanic replacement", "galvanic displacement", "co-reduction",
-    "electrochemical synthesis", "electrodeposition", "template assisted",
-    "plasma treatment", "plasma irradiation", "ion irradiation", "electron irradiation", "gamma irradiation",
-    "laser ablation", "photoreduction", "sonochemical", "microwave assisted",
-    "thermal annealing", "defect engineering", "defect introduction", "strain engineering",
-    "capping agent", "surfactant", "pvp", "ctab", "oleylamine", "oleic acid", "citrate",
-    "ligand exchange", "surface functionalization", "green synthesis"
+    "seed mediated growth", "seed-mediated growth", "seed mediated",
+    "galvanic replacement", "galvanic displacement", "transmetalation",
+    "co-reduction", "coreduction", "simultaneous reduction",
+    "successive reduction", "stepwise reduction", "sequential reduction",
+    "chemical reduction", "thermal reduction", "polyol method", "polyol process",
+    "solvothermal", "hydrothermal", "microemulsion", "reverse microemulsion",
+    "electroless deposition", "electroless plating", "electrochemical deposition",
+    "magnetron sputtering", "sputtering", "physical vapor deposition", "pvd",
+    "chemical vapor deposition", "cvd", "atomic layer deposition", "ald",
+    "molecular beam epitaxy", "mbe",
+    "photochemical reduction", "photoreduction", "radiolytic reduction",
+    "sonochemical", "microwave assisted", "laser ablation",
+    "green synthesis", "biological synthesis", "plant extract",
+    "capping agent", "surfactant", "pvp", "ctab", "oleylamine", "oleic acid",
+    "ligand exchange", "surface functionalization", "self-assembly"
 ]
 
-# Structure and characterization
 STRUCTURE_CHARACTERIZATION = [
-    "high resolution tem", "hrtem", "scanning transmission electron microscopy", "stem", "haadf-stem",
-    "energy dispersive x-ray spectroscopy", "eds", "electron energy loss spectroscopy", "eels",
-    "selected area electron diffraction", "saed", "x-ray diffraction", "xrd",
-    "stacking fault probability", "twin probability", "xrd peak shift", "xrd peak broadening",
+    "transmission electron microscopy", "tem", "high resolution tem", "hrtem",
+    "scanning transmission electron microscopy", "stem", "haadf-stem", "adf-stem",
+    "energy dispersive x-ray spectroscopy", "eds", "edx", "stem-eds", "tem-eds",
+    "elemental mapping", "line scan", "line profile", "eds mapping", "edx mapping",
+    "electron energy loss spectroscopy", "eels", "stem-eels",
+    "x-ray diffraction", "xrd", "xrd peak shift", "peak broadening", "scherrer equation",
+    "selected area electron diffraction", "saed", "x-ray photoelectron spectroscopy", "xps",
     "uv-vis spectroscopy", "uv-vis-nir", "extinction spectrum", "absorption spectrum",
-    "surface enhanced raman scattering", "sers", "sers mapping", "raman spectroscopy",
-    "atomic force microscopy", "afm", "scanning electron microscopy", "sem",
-    "x-ray photoelectron spectroscopy", "xps", "dynamic light scattering", "dls",
-    "defect density", "twin spacing", "twin boundary density", "fringe analysis", "moiré pattern",
-    "strain field", "lattice distortion", "interplanar spacing", "d-spacing"
+    "dynamic light scattering", "dls", "zeta potential", "hydrodynamic diameter",
+    "small angle x-ray scattering", "saxs", "x-ray absorption spectroscopy", "xas",
+    "extended x-ray absorption fine structure", "exafs", "xanes",
+    "scanning electron microscopy", "sem", "fe-sem",
+    "atomic force microscopy", "afm",
+    "energy dispersive spectroscopy", "eds",
+    "inductively coupled plasma", "icp", "icp-oes", "icp-ms",
+    "core shell morphology", "yolk shell", "nanocavity", "porous shell",
+    "lattice fringe", "interplanar spacing", "d-spacing", "crystal structure",
+    "fcc", "face centered cubic", "epitaxial relationship", "orientation relationship"
 ]
 
-# Computational methods
 COMPUTATIONAL_METHODS = [
     "density functional theory", "dft", "ab initio", "first principles",
-    "finite difference time domain", "fdtd", "discrete dipole approximation", "dda", "mie theory",
+    "molecular dynamics", "md", "classical md", "ab initio md", "aimd",
+    "finite difference time domain", "fdtd", "discrete dipole approximation", "dda",
     "boundary element method", "bem", "finite element method", "fem",
-    "molecular dynamics", "md", "ab initio md", "aimd",
+    "mie theory", "mie scattering", "gans theory", "discrete dipole",
+    "monte carlo", "kinetic monte carlo", "kmc", "metropolis algorithm",
+    "machine learning potential", "ml potential", "neural network potential", "nnp",
+    "molecular statics", "nudged elastic band", "neb",
     "comsol multiphysics", "lumerical", "meep",
-    "adsorption energy calculation", "transition state", "neb", "nudged elastic band",
-    "machine learning", "neural network", "high throughput screening"
+    "phase field method", "pfm", "diffusion simulation", "finite element"
 ]
 
-# Functional properties and technological applications
 FUNCTIONAL_PROPERTIES = [
-    "surface enhanced raman scattering", "sers", "sers substrate", "sers activity", "hot spot",
-    "electromagnetic enhancement", "chemical enhancement", "single molecule detection",
+    "surface enhanced raman scattering", "sers", "sers substrate", "sers activity",
+    "hot spot", "electromagnetic enhancement", "chemical enhancement",
+    "localized surface plasmon resonance", "lspr", "plasmonic", "plasmon resonance",
+    "refractive index sensitivity", "figure of merit", "fom",
     "catalytic activity", "electrocatalysis", "photocatalysis", "plasmonic catalysis",
-    "co2 reduction", "co2rr", "oxygen reduction reaction", "orr", "oxygen evolution reaction", "oer",
-    "hydrogen evolution reaction", "her", "nitrate reduction", "nitrite reduction",
-    "antibacterial", "antimicrobial", "bactericidal", "antibiofilm", "wound healing",
-    "biosensor", "chemical sensor", "gas sensor", "colorimetric sensor", "sensing",
-    "photothermal therapy", "ptt", "photodynamic therapy", "pdt", "theranostics", "bioimaging",
-    "localized surface plasmon resonance", "lspr", "refractive index sensitivity"
+    "surface catalysis", "co catalysis", "synergistic effect",
+    "antibacterial", "antimicrobial", "bactericidal", "antibiofilm",
+    "biocompatibility", "cytotoxicity", "cell viability", "drug delivery",
+    "electrical conductivity", "conductivity", "sheet resistance", "interconnect",
+    "conductive ink", "flexible electronics", "stretchable electronics", "wearable",
+    "transparent conductor", "printed electronics", "solder", "die attach",
+    "thermal conductivity", "thermal interface material", "tim",
+    "photothermal therapy", "ptt", "photodynamic therapy", "pdt", "theranostics",
+    "biosensor", "chemical sensor", "gas sensor", "colorimetric sensor",
+    "optical filter", "absorber", "reflective", "structural color"
 ]
 
-ALL_DOMAIN_KEYWORDS = (CORE_MATERIALS + PHYSICOCHEMICAL_PROPERTIES + SYNTHESIS_METHODS +
+ALL_DOMAIN_KEYWORDS = (CORE_MATERIALS + MATERIAL_PROPERTIES + SYNTHESIS_METHODS +
                        STRUCTURE_CHARACTERIZATION + COMPUTATIONAL_METHODS + FUNCTIONAL_PROPERTIES)
 
-# Regex patterns for nanomaterials concept extraction
 NANOMATERIALS_PATTERNS = [
-    r'\b(?:defect\s*(?:engineered|rich|abundant)\s*(?:ag|silver|nanoparticle|nanocrystal))\b',
-    r'\b(?:nanotwinned\s*(?:ag|silver))\b',
-    r'\b(?:twinned\s*(?:ag|silver|nanoparticle|nanocrystal))\b',
-    r'\b(?:intrinsic\s*stacking\s*fault|isf|extrinsic\s*stacking\s*fault|est)\b',
-    r'\b(?:stacking\s*faulted\s*(?:ag|silver|nanoparticle))\b',
-    r'\b(?:ag\s*nanoparticle|silver\s*nanoparticle|ag\s*nanocrystal|silver\s*nanocrystal)\b',
-    r'\b(?:sers|surface\s*enhanced\s*raman|hot\s*spot|electromagnetic\s*enhancement)\b',
-    r'\b(?:catalytic|electrocatalysis|photocatalysis|co2rr|orr|oer|her)\b',
-    r'\b(?:antibacterial|antimicrobial|bactericidal|theranostics|bioimaging)\b',
-    r'\b(?:biosensor|chemical\s*sensor|gas\s*sensor|colorimetric\s*sensor)\b',
-    r'\b(?:plasma\s*treatment|ion\s*irradiation|electron\s*irradiation|gamma\s*irradiation)\b',
-    r'\b(?:defect\s*engineering|defect\s*introduction|strain\s*engineering)\b',
-    r'\b(?:hrtem|stem|haadf|eels|xrd|saed|uv-vis|xps|dls)\b',
-    r'\b(?:dft|fdtd|dda|md|molecular\s*dynamics|comsol|lumerical)\b',
-    r'\b(?:\d+(?:\.\d+)?\s*(?:nm|µm|micrometer|angstrom|å|mv|v|ma/cm2|a/dm2))\b',
-    r'\b(?:enhancement\s*factor|ef|overpotential|current\s*density|plasmon\s*peak)\b'
+    r'\b(?:cu@ag|ag@cu|cu/ag|ag/cu)\b',
+    r'\b(?:core\s*shell\s*(?:cu|ag|copper|silver|cu\s*ag|ag\s*cu|copper\s*silver|silver\s*copper))\b',
+    r'\b(?:cu\s*ag|ag\s*cu|copper\s*silver|silver\s*copper)\s*(?:bimetallic|nanoparticle|nanostructure|nanocrystal|nanowire|nanorod|core\s*shell)\b',
+    r'\b(?:bimetallic\s*(?:nanoparticle|nanowire|nanorod|nanostructure|core\s*shell))\b',
+    r'\b(?:seed\s*mediated|galvanic\s*replacement|galvanic\s*displacement|co\s*reduction)\b',
+    r'\b(?:lattice\s*mismatch|misfit\s*strain|interfacial\s*strain|epitaxial\s*growth)\b',
+    r'\b(?:shell\s*thickness|core\s*diameter|core\s*size|critical\s*thickness)\b',
+    r'\b(?:surface\s*plasmon|localized\s*surface\s*plasmon|lspr|sers|hot\s*spot)\b',
+    r'\b(?:haadf\s*stem|stem\s*eds|tem\s*eds|elemental\s*mapping|line\s*profile)\b',
+    r'\b(?:interdiffusion|kirkendall\s*effect|void\s*formation|interfacial\s*diffusion)\b',
+    r'\b(?:pvp|ctab|oleylamine|oleic\s*acid|capping\s*agent|surfactant)\b',
+    r'\b(?:fdtd|dda|mie\s*theory|comsol|lumerical)\b',
+    r'\b(?:\d+(?:\.\d+)?\s*(?:nm|µm|micrometer|angstrom|å))\b',
+    r'\b(?:uv\s*vis|extinction\s*spectrum|absorption\s*spectrum|plasmon\s*peak)\b'
 ]
 
-# Category mapping for concept classification
 NANOMATERIALS_CATEGORY_MAPPING = {
-    r'defect\s*(?:engineered|rich|abundant)\s*(?:ag|silver)|defective\s*(?:ag|silver)|vacancy\s*(?:rich\s*)?(?:ag|silver)': 'defect_engineered_ag',
-    r'nanotwinned\s*(?:ag|silver)|twinned\s*(?:ag|silver)|twin\s*(?:boundary|boundaries|density|spacing|probability)': 'twinned_ag',
-    r'intrinsic\s*stacking\s*fault|isf|extrinsic\s*stacking\s*fault|est|stacking\s*faulted\s*(?:ag|silver)': 'stacking_faults',
-    r'point\s*defect|dislocation|line\s*defect|planar\s*defect|surface\s*defect': 'crystallographic_defects',
-    r'sers|surface\s*enhanced\s*raman|hot\s*spot|electromagnetic\s*enhancement': 'sers_plasmonics',
-    r'catalytic|electrocatalysis|photocatalysis|co2rr|orr|oer|her|reduction|oxidation': 'catalysis_application',
-    r'antibacterial|antimicrobial|bactericidal|cytotoxicity|wound\s*healing|bioimaging|theranostics': 'biomedical_application',
-    r'biosensor|chemical\s*sensor|gas\s*sensor|colorimetric|sensing': 'sensing_application',
-    r'chemical\s*reduction|polyol|seed\s*mediated|galvanic|plasma|irradiation|defect\s*engineering': 'synthesis_defect_intro',
-    r'hrtem|stem|haadf|eels|xrd|saed|uv-vis|xps|dls': 'advanced_characterization',
-    r'dft|fdtd|dda|md|molecular\s*dynamics|comsol|lumerical': 'computational_modeling'
+    r'cu@ag|ag@cu|cu/ag|ag/cu|copper\s*@\s*silver|silver\s*@\s*copper': 'core_shell_structure',
+    r'core\s*shell\s*(?:cu|ag|copper|silver|bimetallic)': 'core_shell_structure',
+    r'bimetallic\s*(?:cu|ag|copper|silver|nanoparticle|nanostructure)': 'bimetallic_system',
+    r'seed\s*mediated|galvanic\s*replacement|galvanic\s*displacement|co\s*reduction': 'synthesis_method',
+    r'polyol|chemical\s*reduction|thermal\s*reduction|microemulsion|electroless': 'synthesis_method',
+    r'lattice\s*mismatch|misfit\s*strain|interfacial\s*strain|epitaxial|coherency': 'interfacial_structure',
+    r'shell\s*thickness|core\s*diameter|core\s*size|critical\s*thickness|shell\s*volume': 'morphology_dimension',
+    r'interdiffusion|kirkendall|void\s*formation|interfacial\s*diffusion|diffusion': 'interfacial_diffusion',
+    r'surface\s*plasmon|lspr|sers|hot\s*spot|extinction\s*spectrum|plasmon\s*peak': 'plasmonic_optical',
+    r'catalytic|electrocatalysis|photocatalysis|plasmonic\s*catalysis|synergistic': 'catalytic_activity',
+    r'antibacterial|antimicrobial|bactericidal|cytotoxicity|biocompatibility': 'biomedical_property',
+    r'electrical\s*conductivity|sheet\s*resistance|conductive\s*ink|interconnect': 'electronic_property',
+    r'thermal\s*conductivity|thermal\s*stability|thermal\s*interface': 'thermal_property',
+    r'fdtd|dda|mie\s*theory|comsol|lumerical|dft|molecular\s*dynamics': 'computational_method',
+    r'haadf\s*stem|stem\s*eds|tem\s*eds|elemental\s*mapping|line\s*profile': 'advanced_characterization',
+    r'uv\s*vis|xrd|xps|dls|zeta\s*potential|saxs|exafs': 'standard_characterization',
+    r'pvp|ctab|oleylamine|oleic\s*acid|capping\s*agent|surfactant|ligand': 'surface_chemistry',
+    r'biosensor|chemical\s*sensor|gas\s*sensor|colorimetric|photothermal': 'application_device'
 }
 
-# ==========================================
+CATEGORY_DISPLAY_NAMES = {
+    'core_shell_structure': 'Core-Shell Structure',
+    'bimetallic_system': 'Bimetallic System',
+    'synthesis_method': 'Synthesis Method',
+    'interfacial_structure': 'Interfacial Structure',
+    'morphology_dimension': 'Morphology & Dimension',
+    'interfacial_diffusion': 'Interfacial Diffusion',
+    'plasmonic_optical': 'Plasmonic & Optical',
+    'catalytic_activity': 'Catalytic Activity',
+    'biomedical_property': 'Biomedical Property',
+    'electronic_property': 'Electronic Property',
+    'thermal_property': 'Thermal Property',
+    'computational_method': 'Computational Method',
+    'advanced_characterization': 'Advanced Characterization',
+    'standard_characterization': 'Standard Characterization',
+    'surface_chemistry': 'Surface Chemistry',
+    'application_device': 'Application & Device',
+    'general': 'General'
+}
+
+# ==============================================================================
 # UTILITY FUNCTIONS
-# ==========================================
+# ==============================================================================
 def compute_text_hash(text: str) -> str:
     return hashlib.md5(text.encode('utf-8')).hexdigest()
 
@@ -358,9 +463,9 @@ def get_adaptive_config(num_abstracts: int) -> Dict[str, Any]:
             "TOP_N_CONCEPTS": 1000, "MAX_CONCEPT_LENGTH": 10
         }
 
-# ==========================================
+# ==============================================================================
 # DEVICE & MODEL MANAGEMENT
-# ==========================================
+# ==============================================================================
 @st.cache_resource(show_spinner=False)
 def load_embedding_model():
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -370,9 +475,9 @@ def load_embedding_model():
         st.error(f"Embedding model error: {e}")
         return SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2", device="cpu")
 
-# ==========================================
+# ==============================================================================
 # CONCEPT EXTRACTION & NORMALIZATION
-# ==========================================
+# ==============================================================================
 def is_valid_nanomaterials_concept(concept: str) -> bool:
     concept_lower = concept.lower()
     has_domain = any(kw.lower() in concept_lower for kw in ALL_DOMAIN_KEYWORDS)
@@ -389,15 +494,21 @@ def is_valid_nanomaterials_concept(concept: str) -> bool:
 
 def normalize_nanomaterials_term(concept: str) -> str:
     concept = concept.lower().strip()
-    # Normalize core materials & defects
-    concept = re.sub(r'\bdefect\s*engineered\s*silver\b', 'defect engineered ag', concept)
-    concept = re.sub(r'\bdefective\s*ag\s*nanoparticle\b', 'defect engineered ag', concept)
-    concept = re.sub(r'\bnanotwinned\s*ag\b', 'nanotwinned ag', concept)
-    concept = re.sub(r'\bintrinsic\s*stacking\s*fault\b', 'isf', concept)
-    concept = re.sub(r'\bextrinsic\s*stacking\s*fault\b', 'est', concept)
-    concept = re.sub(r'\bag\s*nanoparticle\b', 'ag nanoparticle', concept)
-    concept = re.sub(r'\bsilver\s*nanoparticle\b', 'ag nanoparticle', concept)
-    
+    # Normalize core materials
+    concept = re.sub(r'\bcu@ag\b', 'cu@ag core shell', concept)
+    concept = re.sub(r'\bag@cu\b', 'ag@cu core shell', concept)
+    concept = re.sub(r'\bcu/ag\b', 'cu@ag core shell', concept)
+    concept = re.sub(r'\bag/cu\b', 'ag@cu core shell', concept)
+    concept = re.sub(r'\bcore\s*shell\s*copper\s*silver\b', 'cu@ag core shell', concept)
+    concept = re.sub(r'\bcore\s*shell\s*silver\s*copper\b', 'ag@cu core shell', concept)
+    concept = re.sub(r'\bcopper\s*silver\s*nanoparticle\b', 'cu ag nanoparticle', concept)
+    concept = re.sub(r'\bsilver\s*copper\s*nanoparticle\b', 'ag cu nanoparticle', concept)
+    concept = re.sub(r'\bcopper\s*silver\s*bimetallic\b', 'cu ag bimetallic', concept)
+    # Normalize synthesis
+    concept = re.sub(r'\bseed\s*mediated\sgrowth\b', 'seed mediated growth', concept)
+    concept = re.sub(r'\bgalvanic\s*replacement\b', 'galvanic replacement', concept)
+    concept = re.sub(r'\bgalvanic\s*displacement\b', 'galvanic replacement', concept)
+    concept = re.sub(r'\bco\s*reduction\b', 'co-reduction', concept)
     # Normalize characterization
     concept = re.sub(r'\bhigh\s*resolution\s*tem\b', 'hrtem', concept)
     concept = re.sub(r'\bscanning\s*transmission\s*electron\s*microscopy\b', 'stem', concept)
@@ -406,16 +517,14 @@ def normalize_nanomaterials_term(concept: str) -> str:
     concept = re.sub(r'\bx-ray\s*diffraction\b', 'xrd', concept)
     concept = re.sub(r'\bx-ray\s*photoelectron\s*spectroscopy\b', 'xps', concept)
     concept = re.sub(r'\buv-vis\s*spectroscopy\b', 'uv-vis', concept)
-    concept = re.sub(r'\bsurface\s*enhanced\s*raman\s*scattering\b', 'sers', concept)
-    
     # Normalize computational
     concept = re.sub(r'\bdensity\s*functional\s*theory\b', 'dft', concept)
     concept = re.sub(r'\bab\s*initio\b', 'ab initio', concept)
     concept = re.sub(r'\bfirst\s*principles\b', 'first principles', concept)
     concept = re.sub(r'\bmolecular\s*dynamics\b', 'molecular dynamics', concept)
+    concept = re.sub(r'\bfinite\s*element\b', 'finite element', concept)
     concept = re.sub(r'\bfinite\s*difference\s*time\s*domain\b', 'fdtd', concept)
     concept = re.sub(r'\bdiscrete\s*dipole\s*approximation\b', 'dda', concept)
-    
     # Normalize units
     concept = re.sub(r'\bnm\b', 'nm', concept)
     concept = re.sub(r'\bµm\b', 'um', concept)
@@ -450,7 +559,7 @@ def extract_concepts_from_text(text: str) -> List[str]:
                 if is_valid_nanomaterials_concept(concept):
                     concepts.add(concept)
     # Material-property pairs
-    material_prop_pattern = r'\b([A-Z][a-z]+(?:\d+(?:\.\d+)?)?(?:[\s\-][A-Z][a-z]?\d*)+)\b\s+(?:with|having|exhibiting|showing|demonstrating|achieving|reaching|delivering|providing|offering)\s+(?:a\s+)?([\d\.]+\s*(?:nm|um|µm|angstrom|å|mv|v|ma/cm2|a/dm2|ma\s*mg-1))\b'
+    material_prop_pattern = r'\b([A-Z][a-z]+(?:\d+(?:\.\d+)?)?(?:[\s\-][A-Z][a-z]?\d*)+)\b\s+(?:with|having|exhibiting|showing|demonstrating|achieving|reaching|delivering|providing|offering)\s+(?:a\s+)?([\d\.]+\s*(?:nm|um|µm|angstrom|å|nm/riu|mv/dec|ma/cm2|s/cm|w/mk))\b'
     matches = re.findall(material_prop_pattern, text, re.I)
     for material, value in matches:
         concept = f"{material.lower()} {value.lower()}"
@@ -467,25 +576,19 @@ def extract_concepts_from_abstracts(df: pd.DataFrame, text_columns: List[str]) -
             if col in row and pd.notna(row[col]):
                 combined_text += " " + str(row[col])
         metrics = {}
-        # Extract defect and application specific metrics
+        # Extract core-shell specific metrics
         size_matches = re.findall(r'(\d+(?:\.\d+)?)\s*(?:nm|um|µm)', combined_text, re.I)
         if size_matches: metrics['size_nm_um'] = [float(m) for m in size_matches]
-        
-        defect_density_matches = re.findall(r'(?:defect\s*density|twin\s*density)\s*(?:of|is|=|:)?\s*(\d+(?:\.\d+)?)\s*(?:x\s*10\^\d+|e\+?\d+)?\s*(?:m\^-2|/m\^2|per\s*m\^2|cm\^-2)', combined_text, re.I)
-        if defect_density_matches: metrics['defect_density'] = [float(m) for m in defect_density_matches]
-        
-        enhancement_matches = re.findall(r'(\d+(?:\.\d+)?)\s*(?:x|×|\*)?\s*(?:enhancement\s*factor|ef|sers\s*ef)', combined_text, re.I)
-        if enhancement_matches: metrics['sers_enhancement_factor'] = [float(m) for m in enhancement_matches]
-        
-        wavelength_matches = re.findall(r'(?:plasmon\s*peak|lspr\s*peak|absorption\s*peak)\s*(?:of|is|=|:)?\s*(\d+(?:\.\d+)?)\s*(?:nm)', combined_text, re.I)
+        shell_matches = re.findall(r'shell\s*(?:thickness|width)\s*(?:of|is|=|:)?\s*(\d+(?:\.\d+)?)\s*(?:nm|um|µm)', combined_text, re.I)
+        if shell_matches: metrics['shell_thickness_nm'] = [float(m) for m in shell_matches]
+        core_matches = re.findall(r'core\s*(?:diameter|size|radius)\s*(?:of|is|=|:)?\s*(\d+(?:\.\d+)?)\s*(?:nm|um|µm)', combined_text, re.I)
+        if core_matches: metrics['core_diameter_nm'] = [float(m) for m in core_matches]
+        wavelength_matches = re.findall(r'(\d+(?:\.\d+)?)\s*(?:nm)\s*(?:plasmon|peak|absorption|extinction|wavelength|spr|lspr)', combined_text, re.I)
         if wavelength_matches: metrics['plasmon_peak_nm'] = [float(m) for m in wavelength_matches]
-        
-        overpotential_matches = re.findall(r'(?:overpotential|onset\s*potential)\s*(?:of|is|=|:)?\s*(\d+(?:\.\d+)?)\s*(?:mv|v)', combined_text, re.I)
-        if overpotential_matches: metrics['overpotential_mv'] = [float(m) for m in overpotential_matches]
-        
-        current_density_matches = re.findall(r'(\d+(?:\.\d+)?)\s*(?:ma/cm2|ma\s*cm-2|a/dm2|a\s*dm-2|ma\s*mg-1)', combined_text, re.I)
-        if current_density_matches: metrics['current_density'] = [float(m) for m in current_density_matches]
-        
+        sensitivity_matches = re.findall(r'(\d+(?:\.\d+)?)\s*(?:nm/riu|nm/riU)', combined_text, re.I)
+        if sensitivity_matches: metrics['refractive_index_sensitivity'] = [float(m) for m in sensitivity_matches]
+        enhancement_matches = re.findall(r'(\d+(?:\.\d+)?)\s*(?:x|×|\*)?\s*(?:enhancement\s*factor|ef|sers\s*ef)', combined_text, re.I)
+        if enhancement_matches: metrics['enhancement_factor'] = [float(m) for m in enhancement_matches]
         all_metrics.append(metrics)
         concepts = extract_concepts_from_text(combined_text)
         normalized = [normalize_nanomaterials_term(c) for c in concepts]
@@ -567,23 +670,23 @@ def abstract_concepts_to_categories(concepts: List[str]) -> Dict[str, str]:
                 matched = True
                 break
         if not matched:
-            if any(re.search(p, concept, re.I) for p in [r'\bdefect\s*engineered', r'\bdefective', r'\bag\s*defect']):
-                concept_to_abstract[concept] = 'defect_engineered_ag'
-            elif any(re.search(p, concept, re.I) for p in [r'\bnanotwinned', r'\btwin', r'\bisf', r'\best', r'\bstacking\s*fault']):
-                concept_to_abstract[concept] = 'twinned_ag'
-            elif any(re.search(p, concept, re.I) for p in [r'\bsers', r'\bplasmon', r'\bhot\s*spot']):
-                concept_to_abstract[concept] = 'sers_plasmonics'
-            elif any(re.search(p, concept, re.I) for p in [r'\bcatalytic', r'\bco2rr', r'\borr', r'\boer', r'\bher']):
-                concept_to_abstract[concept] = 'catalysis_application'
+            if any(re.search(p, concept, re.I) for p in [r'\bcu@ag', r'\bag@cu', r'\bcore\s*shell']):
+                concept_to_abstract[concept] = 'core_shell_structure'
+            elif any(re.search(p, concept, re.I) for p in [r'\bbimetallic', r'\bcu\s*ag', r'\bag\s*cu']):
+                concept_to_abstract[concept] = 'bimetallic_system'
+            elif any(re.search(p, concept, re.I) for p in [r'\bseed\s*mediated', r'\bgalvanic', r'\bco-reduction']):
+                concept_to_abstract[concept] = 'synthesis_method'
+            elif any(re.search(p, concept, re.I) for p in [r'\blspr', r'\bsers', r'\bplasmon']):
+                concept_to_abstract[concept] = 'plasmonic_optical'
             else:
                 concept_to_abstract[concept] = 'general'
     return concept_to_abstract
 
-# ==========================================
+# ==============================================================================
 # CONCEPT DISTILLATION
-# ==========================================
+# ==============================================================================
 def compute_concept_distillation(valid_concepts: List[str], concept_abstract_map: Dict[str, List[int]],
-                                  all_texts: List[str]) -> pd.DataFrame:
+                                 all_texts: List[str]) -> pd.DataFrame:
     distill_data = []
     doc_corpus = []
     for c in valid_concepts:
@@ -616,11 +719,11 @@ def compute_concept_distillation(valid_concepts: List[str], concept_abstract_map
         })
     return pd.DataFrame(distill_data).sort_values("distillation_efficiency", ascending=False)
 
-# ==========================================
+# ==============================================================================
 # GRAPH CONSTRUCTION
-# ==========================================
+# ==============================================================================
 def build_hybrid_graph(all_concepts: List[List[str]], valid_concepts: List[str],
-                        concept_to_id: Dict[str, int], embed_model=None, config: Dict = None) -> nx.Graph:
+                       concept_to_id: Dict[str, int], embed_model=None, config: Dict = None) -> nx.Graph:
     if config is None:
         config = get_adaptive_config(3000)
     nx_graph = nx.Graph()
@@ -650,7 +753,7 @@ def build_hybrid_graph(all_concepts: List[List[str]], valid_concepts: List[str],
                     sim = sim_matrix[i][j]
                     if sim > sim_thresh and (nx_graph.degree(c1) < 3 or nx_graph.degree(c2) < 3):
                         nx_graph.add_edge(c1, c2, weight=sim * 2, cooccurrence=0,
-                                         semantic=sim, edge_type='semantic')
+                                          semantic=sim, edge_type='semantic')
         except Exception as e:
             st.warning(f"Semantic edge addition skipped: {e}")
     cooc_weight = config.get("COOCCURRENCE_WEIGHT", 0.9)
@@ -662,7 +765,7 @@ def build_hybrid_graph(all_concepts: List[List[str]], valid_concepts: List[str],
     return nx_graph
 
 def sample_edges_for_training(nx_graph: nx.Graph, valid_concepts: List[str],
-                               concept_to_id: Dict[str, int], config: Dict = None) -> Tuple[List[Tuple], List[Tuple]]:
+                              concept_to_id: Dict[str, int], config: Dict = None) -> Tuple[List[Tuple], List[Tuple]]:
     pos_pairs = [(concept_to_id[u], concept_to_id[v]) for u, v in nx_graph.edges()]
     neg_pairs = []
     n_nodes = len(valid_concepts)
@@ -693,9 +796,9 @@ def sample_edges_for_training(nx_graph: nx.Graph, valid_concepts: List[str],
             neg_pairs.append((u_idx, v_idx))
     return pos_pairs, neg_pairs
 
-# ==========================================
+# ==============================================================================
 # GNN MODEL
-# ==========================================
+# ==============================================================================
 class SparseGraphSAGE(nn.Module):
     def __init__(self, in_dim: int, hidden_dim: int = 128):
         super().__init__()
@@ -704,6 +807,7 @@ class SparseGraphSAGE(nn.Module):
         self.decoder = nn.Sequential(
             nn.Linear(hidden_dim * 2, hidden_dim), nn.ReLU(), nn.Linear(hidden_dim, 1)
         )
+
     def forward(self, adj_indices, adj_values, num_nodes, h, pos_u, pos_v, neg_u, neg_v):
         A = sparse.FloatTensor(adj_indices, adj_values, torch.Size([num_nodes, num_nodes])).to(h.device)
         deg = torch.sparse.sum(A, dim=1).to_dense().clamp(min=1)
@@ -742,11 +846,11 @@ def train_gnn(node_features, nx_graph, concept_to_id, pos_pairs, neg_pairs,
         optimizer.zero_grad()
         if len(neg_pairs) == 0:
             pos_out, _, _ = model(adj_indices, adj_values, num_nodes, node_features,
-                                 pos_u, pos_v, pos_u[:1], pos_v[:1])
+                                  pos_u, pos_v, pos_u[:1], pos_v[:1])
             loss = criterion(pos_out, torch.ones_like(pos_out)) * 0.5
         else:
             pos_out, neg_out, _ = model(adj_indices, adj_values, num_nodes, node_features,
-                                         pos_u, pos_v, neg_u, neg_v)
+                                        pos_u, pos_v, neg_u, neg_v)
             pos_loss = criterion(pos_out, torch.ones_like(pos_out))
             neg_loss = criterion(neg_out, torch.zeros_like(neg_out))
             loss = 0.5 * (pos_loss + neg_loss)
@@ -761,12 +865,12 @@ def train_gnn(node_features, nx_graph, concept_to_id, pos_pairs, neg_pairs,
                                        neg_v[:1] if len(neg_pairs) > 0 else pos_v[:1])
     return model, final_embeddings.cpu(), adj_indices.cpu(), adj_values.cpu()
 
-# ==========================================
+# ==============================================================================
 # RESEARCH DIRECTION SCORING
-# ==========================================
+# ==============================================================================
 def compute_research_direction_scores(model, node_features, final_emb, nx_graph,
-                                       valid_concepts, concept_properties, ridge,
-                                       embed_model, n_samples: int = 5000) -> pd.DataFrame:
+                                      valid_concepts, concept_properties, ridge,
+                                      embed_model, n_samples: int = 5000) -> pd.DataFrame:
     n_concepts = len(valid_concepts)
     if n_concepts < 3:
         return pd.DataFrame()
@@ -790,6 +894,8 @@ def compute_research_direction_scores(model, node_features, final_emb, nx_graph,
         gnn_logits = model.decoder(pair_features).squeeze(1)
         gnn_scores = torch.sigmoid(gnn_logits).numpy()
     emb_np = embed_model.encode(valid_concepts, show_progress_bar=False, batch_size=64)
+    if len(emb_np) == 0:
+        return pd.DataFrame()
     cos_sims = np.sum(emb_np[u_tensor.numpy()] * emb_np[v_tensor.numpy()], axis=1)
     results = []
     for i, (u_idx, v_idx, u_c, v_c) in enumerate(candidate_pairs):
@@ -815,12 +921,12 @@ def compute_research_direction_scores(model, node_features, final_emb, nx_graph,
     df = pd.DataFrame(results).sort_values('composite_score', ascending=False)
     return df.head(min(100, len(df)))
 
-# ==========================================
+# ==============================================================================
 # MATHEMATICAL VALIDATION
-# ==========================================
+# ==============================================================================
 def validate_graph_metrics(nx_graph: nx.Graph, valid_concepts: List[str]) -> Dict[str, Any]:
     metrics = {}
-    if nx_graph.number_of_nodes() < 3:
+    if nx_graph.number_of_nodes() < 3 or not valid_concepts:
         return metrics
     try:
         from networkx.algorithms import community
@@ -875,56 +981,554 @@ def compute_bootstrap_ci(scores: np.ndarray, n_bootstrap: int = 500, alpha: floa
     ci_high = np.percentile(boot_means, 100 * (1 - alpha / 2))
     return float(np.mean(scores)), float(ci_low), float(ci_high)
 
-# ==========================================
-# VISUALIZATION FUNCTIONS
-# ==========================================
+# ==============================================================================
+# ADVANCED FEATURE 1: KEYWORD BURST DETECTION (Kleinberg Algorithm-inspired)
+# ==============================================================================
+def detect_keyword_bursts(df_filtered, concept_abstract_map, valid_concepts, year_col='Year',
+                          gamma: float = 1.0, sigma: float = 1.0):
+    """
+    Detect keyword bursts using a simplified Kleinberg algorithm.
+    Returns DataFrame with burst levels for each concept.
+    """
+    if year_col not in df_filtered.columns:
+        return pd.DataFrame()
+    df_years = df_filtered[df_filtered[year_col].notna()].copy()
+    if df_years.empty:
+        return pd.DataFrame()
+    df_years[year_col] = pd.to_numeric(df_years[year_col], errors="coerce")
+    df_years = df_years.dropna(subset=[year_col])
+    if df_years.empty:
+        return pd.DataFrame()
+    years = sorted([y for y in df_years[year_col].unique() if pd.notna(y)])
+    if len(years) < 3:
+        return pd.DataFrame()
+    abs_year = {i: y for i, y in df_years[year_col].items() if i < len(df_filtered)}
+    burst_data = []
+    for concept in valid_concepts:
+        abs_list = concept_abstract_map.get(concept, [])
+        concept_years = [abs_year[idx] for idx in abs_list if idx in abs_year]
+        if not concept_years:
+            continue
+        year_counts = Counter(concept_years)
+        total = len(concept_years)
+        # Compute burst score: ratio of max consecutive years to total span
+        if total < 2:
+            continue
+        year_list = sorted(concept_years)
+        span = max(year_list) - min(year_list) + 1
+        if span < 2:
+            continue
+        # Find longest consecutive run
+        max_run = 1
+        current_run = 1
+        for i in range(1, len(year_list)):
+            if year_list[i] == year_list[i-1] + 1:
+                current_run += 1
+                max_run = max(max_run, current_run)
+            elif year_list[i] != year_list[i-1]:
+                current_run = 1
+        # Burst score: concentration + recency
+        concentration = max_run / span if span > 0 else 0
+        recency = year_list.count(max(years)) / total if total > 0 else 0
+        burst_score = concentration * (1 + gamma * recency)
+        burst_data.append({
+            'concept': concept,
+            'burst_score': burst_score,
+            'concentration': concentration,
+            'recency': recency,
+            'total_occurrences': total,
+            'year_span': span,
+            'first_year': min(year_list),
+            'last_year': max(year_list),
+            'max_consecutive': max_run
+        })
+    return pd.DataFrame(burst_data).sort_values('burst_score', ascending=False)
+
+# ==============================================================================
+# ADVANCED FEATURE 2: CROSS-DOMAIN BRIDGE DETECTION
+# ==============================================================================
+def detect_cross_domain_bridges(nx_graph, valid_concepts):
+    """
+    Detect concepts that bridge between different knowledge domains.
+    A bridge concept connects nodes from different categories with high betweenness.
+    """
+    if nx_graph.number_of_nodes() < 5:
+        return pd.DataFrame()
+    category_map = abstract_concepts_to_categories(valid_concepts)
+    # Compute betweenness centrality
+    try:
+        betweenness = nx.betweenness_centrality(nx_graph, normalized=True, k=min(100, nx_graph.number_of_nodes()))
+    except Exception:
+        betweenness = {n: 0 for n in nx_graph.nodes()}
+    bridge_scores = []
+    for node in nx_graph.nodes():
+        neighbors = list(nx_graph.neighbors(node))
+        if len(neighbors) < 2:
+            continue
+        neighbor_categories = set()
+        for nb in neighbors:
+            neighbor_categories.add(category_map.get(nb, 'general'))
+        # Bridge score: betweenness * category diversity
+        cat_diversity = len(neighbor_categories) / len(neighbors) if neighbors else 0
+        bridge_score = betweenness.get(node, 0) * cat_diversity
+        bridge_scores.append({
+            'concept': node,
+            'bridge_score': bridge_score,
+            'betweenness': betweenness.get(node, 0),
+            'category_diversity': cat_diversity,
+            'neighbor_count': len(neighbors),
+            'categories_spanned': list(neighbor_categories),
+            'own_category': category_map.get(node, 'general')
+        })
+    return pd.DataFrame(bridge_scores).sort_values('bridge_score', ascending=False)
+
+# ==============================================================================
+# ADVANCED FEATURE 3: NETWORK MOTIF ANALYSIS
+# ==============================================================================
+def analyze_network_motifs(nx_graph, valid_concepts, max_size: int = 4):
+    """
+    Analyze common network motifs (triangles, stars, chains) in the concept graph.
+    """
+    if nx_graph.number_of_nodes() < 3:
+        return {}
+    motifs = {
+        'triangles': 0,
+        'stars': 0,
+        'chains': 0,
+        'cliques_4': 0,
+        'total_nodes': nx_graph.number_of_nodes(),
+        'total_edges': nx_graph.number_of_edges()
+    }
+    # Count triangles
+    try:
+        triangles = nx.triangles(nx_graph)
+        motifs['triangles'] = sum(triangles.values()) // 3
+        motifs['avg_clustering'] = nx.average_clustering(nx_graph)
+    except Exception:
+        pass
+    # Count star motifs (nodes with degree >= 3)
+    degree_sequence = [d for n, d in nx_graph.degree()]
+    motifs['stars'] = sum(1 for d in degree_sequence if d >= 3)
+    motifs['max_degree'] = max(degree_sequence) if degree_sequence else 0
+    motifs['avg_degree'] = np.mean(degree_sequence) if degree_sequence else 0
+    # Count 4-cliques
+    try:
+        cliques = list(nx.find_cliques(nx_graph))
+        motifs['cliques_4'] = sum(1 for c in cliques if len(c) >= 4)
+    except Exception:
+        pass
+    # Transitivity
+    try:
+        motifs['transitivity'] = nx.transitivity(nx_graph)
+    except Exception:
+        motifs['transitivity'] = 0.0
+    return motifs
+
+# ==============================================================================
+# ADVANCED FEATURE 4: SEMANTIC DRIFT DETECTION
+# ==============================================================================
+def detect_semantic_drift(valid_concepts, concept_abstract_map, all_texts, embed_model,
+                          year_col='Year', df_filtered=None):
+    """
+    Detect how concept meanings shift over time by comparing early vs late embeddings.
+    """
+    if df_filtered is None or year_col not in df_filtered.columns:
+        return pd.DataFrame()
+    df_years = df_filtered[df_filtered[year_col].notna()].copy()
+    df_years[year_col] = pd.to_numeric(df_years[year_col], errors="coerce")
+    df_years = df_years.dropna(subset=[year_col])
+    if df_years.empty or len(df_years) < 10:
+        return pd.DataFrame()
+    abs_year = {i: y for i, y in df_years[year_col].items() if i < len(df_filtered)}
+    median_year = df_years[year_col].median()
+    # Ensure we have enough concepts with year data
+    year_concepts = 0
+    for concept in valid_concepts:
+        abs_list = concept_abstract_map.get(concept, [])
+        if any(idx in abs_year for idx in abs_list):
+            year_concepts += 1
+    if year_concepts < 3:
+        return pd.DataFrame()
+    drift_data = []
+    for concept in valid_concepts:
+        abs_list = concept_abstract_map.get(concept, [])
+        early_texts = [all_texts[i] for i in abs_list if i in abs_year and abs_year[i] <= median_year]
+        late_texts = [all_texts[i] for i in abs_list if i in abs_year and abs_year[i] > median_year]
+        if len(early_texts) < 2 or len(late_texts) < 2:
+            continue
+        try:
+            early_emb = embed_model.encode(early_texts, show_progress_bar=False, batch_size=32)
+            late_emb = embed_model.encode(late_texts, show_progress_bar=False, batch_size=32)
+            early_centroid = np.mean(early_emb, axis=0)
+            late_centroid = np.mean(late_emb, axis=0)
+            drift = 1 - cosine_similarity([early_centroid], [late_centroid])[0, 0]
+            drift_data.append({
+                'concept': concept,
+                'semantic_drift': float(drift),
+                'early_count': len(early_texts),
+                'late_count': len(late_texts),
+                'median_year': median_year
+            })
+        except Exception:
+            continue
+    return pd.DataFrame(drift_data).sort_values('semantic_drift', ascending=False)
+
+# ==============================================================================
+# ADVANCED FEATURE 5: CONCEPT GENEALOGY (ANCESTRY TRACKING)
+# ==============================================================================
+def build_concept_genealogy(nx_graph, valid_concepts, concept_abstract_map):
+    """
+    Build a concept genealogy by tracing shortest paths and identifying parent-child
+    relationships based on frequency and connectivity patterns.
+    """
+    if nx_graph.number_of_nodes() < 3 or not valid_concepts:
+        return pd.DataFrame()
+    genealogy = []
+    freq_map = {c: len(concept_abstract_map.get(c, [])) for c in valid_concepts}
+    for concept in valid_concepts:
+        if concept not in nx_graph:
+            continue
+        # Find "parent" concepts: higher frequency, directly connected
+        parents = []
+        for neighbor in nx_graph.neighbors(concept):
+            if freq_map.get(neighbor, 0) > freq_map.get(concept, 0):
+                parents.append(neighbor)
+        # Find "children" concepts: lower frequency, directly connected
+        children = []
+        for neighbor in nx_graph.neighbors(concept):
+            if freq_map.get(neighbor, 0) < freq_map.get(concept, 0):
+                children.append(neighbor)
+        # Find "siblings": same frequency tier, shared parents
+        siblings = []
+        for other in valid_concepts:
+            if other != concept and other in nx_graph:
+                shared = set(nx_graph.neighbors(concept)) & set(nx_graph.neighbors(other))
+                if len(shared) > 0 and abs(freq_map.get(other, 0) - freq_map.get(concept, 0)) < 3:
+                    siblings.append(other)
+        genealogy.append({
+            'concept': concept,
+            'frequency': freq_map.get(concept, 0),
+            'parents': parents,
+            'n_parents': len(parents),
+            'children': children,
+            'n_children': len(children),
+            'siblings': siblings,
+            'n_siblings': len(siblings),
+            'generation': 0  # Will be computed
+        })
+    df_genealogy = pd.DataFrame(genealogy)
+    # Compute generations (topological layers)
+    if not df_genealogy.empty:
+        # Root concepts: no parents
+        roots = df_genealogy[df_genealogy['n_parents'] == 0]['concept'].tolist()
+        generation_map = {c: 0 for c in roots}
+        # BFS to assign generations
+        queue = deque(roots)
+        visited = set(roots)
+        while queue:
+            current = queue.popleft()
+            current_gen = generation_map.get(current, 0)
+            # Find children
+            row = df_genealogy[df_genealogy['concept'] == current]
+            if not row.empty:
+                children = row.iloc[0]['children']
+                for child in children:
+                    if child not in visited:
+                        generation_map[child] = current_gen + 1
+                        visited.add(child)
+                        queue.append(child)
+        df_genealogy['generation'] = df_genealogy['concept'].map(generation_map).fillna(0).astype(int)
+    return df_genealogy
+
+# ==============================================================================
+# ADVANCED FEATURE 6: AUTOMATED REPORT GENERATION
+# ==============================================================================
+def generate_analysis_report(data, metrics, val_metrics, top_scores, distill_df,
+                             burst_df, bridge_df, motif_data, drift_df, genealogy_df):
+    """Generate a comprehensive Markdown report of the analysis."""
+    report = []
+    report.append("# NanoGraph-Explorer Analysis Report")
+    report.append(f"\n**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+    report.append("## 1. Dataset Overview")
+    report.append(f"- **Total Concepts:** {len(data['valid_concepts'])}")
+    report.append(f"- **Total Edges:** {data['nx_graph'].number_of_edges()}")
+    report.append(f"- **Documents Analyzed:** {len(data['all_texts'])}")
+    report.append("")
+    report.append("## 2. Graph Topology Metrics")
+    report.append(f"- **Density:** {metrics.get('density', 0):.4f}")
+    report.append(f"- **Average Degree:** {metrics.get('avg_degree', 0):.2f}")
+    report.append(f"- **Clustering Coefficient:** {metrics.get('clustering', 0):.4f}")
+    report.append(f"- **Connected Components:** {metrics.get('connected_components', 0)}")
+    report.append(f"- **Modularity:** {val_metrics.get('modularity', 0):.4f}")
+    report.append(f"- **Silhouette Score:** {val_metrics.get('silhouette_score', 0):.4f}")
+    report.append("")
+    report.append("## 3. Top Concepts by Distillation Efficiency")
+    if not distill_df.empty:
+        for _, row in distill_df.head(10).iterrows():
+            report.append(f"- **{row['concept']}**: {row['distillation_efficiency']:.3f} (freq={row['frequency']})")
+    report.append("")
+    report.append("## 4. Top Research Direction Recommendations")
+    if not top_scores.empty:
+        for _, row in top_scores.head(10).iterrows():
+            report.append(f"- **{row['concept_u']}** ↔ **{row['concept_v']}**: {row['composite_score']:.3f}")
+    report.append("")
+    report.append("## 5. Keyword Burst Detection")
+    if not burst_df.empty:
+        for _, row in burst_df.head(10).iterrows():
+            report.append(f"- **{row['concept']}**: burst={row['burst_score']:.3f}, span={row['year_span']}y")
+    report.append("")
+    report.append("## 6. Cross-Domain Bridges")
+    if not bridge_df.empty:
+        for _, row in bridge_df.head(10).iterrows():
+            report.append(f"- **{row['concept']}**: bridge={row['bridge_score']:.3f}, categories={row['category_diversity']:.2f}")
+    report.append("")
+    report.append("## 7. Network Motifs")
+    report.append(f"- **Triangles:** {motif_data.get('triangles', 0)}")
+    report.append(f"- **Star Nodes:** {motif_data.get('stars', 0)}")
+    report.append(f"- **4-Cliques:** {motif_data.get('cliques_4', 0)}")
+    report.append(f"- **Transitivity:** {motif_data.get('transitivity', 0):.4f}")
+    report.append("")
+    report.append("## 8. Semantic Drift")
+    if not drift_df.empty:
+        for _, row in drift_df.head(10).iterrows():
+            report.append(f"- **{row['concept']}**: drift={row['semantic_drift']:.4f}")
+    report.append("")
+    return "\n".join(report)
+
+# ==============================================================================
+# ADVANCED FEATURE 7: PUBLICATION-QUALITY FIGURE EXPORT
+# ==============================================================================
+def export_publication_figure(nx_graph, concept_abstract_map, valid_concepts,
+                              figure_type: str = "network", dpi: int = 300,
+                              cmap_name: str = "viridis", width: int = 12, height: int = 10):
+    """Generate publication-quality figures using Matplotlib."""
+    fig = plt.figure(figsize=(width, height), dpi=dpi)
+    if figure_type == "network":
+        pos = nx.spring_layout(nx_graph, seed=42, k=2.5)
+        node_colors = [get_nanomaterials_category_color(n) for n in nx_graph.nodes()]
+        node_sizes = [max(100, min(800, len(concept_abstract_map.get(n, [])) * 30)) for n in nx_graph.nodes()]
+        nx.draw_networkx_edges(nx_graph, pos, alpha=0.3, edge_color='gray', width=0.5)
+        nx.draw_networkx_nodes(nx_graph, pos, node_color=node_colors, node_size=node_sizes,
+                               alpha=0.9, edgecolors='white', linewidths=1)
+        nx.draw_networkx_labels(nx_graph, pos, font_size=6, font_weight='bold')
+        plt.title("Core-Shell Ag-Cu Nanostructure Concept Network", fontsize=14, fontweight='bold')
+        plt.axis('off')
+    elif figure_type == "degree_distribution":
+        degrees = [d for n, d in nx_graph.degree()]
+        plt.hist(degrees, bins=30, color='steelblue', alpha=0.7, edgecolor='black')
+        plt.xlabel("Degree", fontsize=12)
+        plt.ylabel("Frequency", fontsize=12)
+        plt.title("Degree Distribution", fontsize=14, fontweight='bold')
+        plt.grid(True, alpha=0.3)
+    elif figure_type == "community":
+        try:
+            from networkx.algorithms import community
+            comms = list(community.greedy_modularity_communities(nx_graph))
+            colors = get_colormap_colors(cmap_name, len(comms))
+            node_color_map = {}
+            for i, comm in enumerate(comms):
+                for node in comm:
+                    node_color_map[node] = colors[i % len(colors)]
+            pos = nx.spring_layout(nx_graph, seed=42)
+            node_colors = [node_color_map.get(n, '#999999') for n in nx_graph.nodes()]
+            nx.draw(nx_graph, pos, node_color=node_colors, with_labels=True,
+                    node_size=300, font_size=6, edge_color='gray', alpha=0.6)
+            plt.title("Community Structure", fontsize=14, fontweight='bold')
+            plt.axis('off')
+        except Exception as e:
+            plt.text(0.5, 0.5, f"Community detection failed: {e}", ha='center', va='center')
+            plt.axis('off')
+    # Save to bytes
+    import io
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', dpi=dpi, bbox_inches='tight', facecolor='white')
+    buf.seek(0)
+    plt.close()
+    return buf.getvalue()
+
+# ==============================================================================
+# GRAPH EDITING WITH UNDO/REDO
+# ==============================================================================
+class GraphEditHistory:
+    """Manage graph editing history with undo/redo capability."""
+    def __init__(self, max_history: int = 50):
+        self.history = deque(maxlen=max_history)
+        self.redo_stack = deque(maxlen=max_history)
+        self.current_index = -1
+
+    def push_state(self, state):
+        """Push a new state onto history."""
+        # Remove any future states if we're not at the end
+        while len(self.history) > self.current_index + 1:
+            self.history.pop()
+        self.history.append(copy.deepcopy(state))
+        self.current_index = len(self.history) - 1
+        self.redo_stack.clear()
+
+    def undo(self):
+        """Undo last edit."""
+        if self.current_index > 0:
+            self.redo_stack.append(copy.deepcopy(self.history[self.current_index]))
+            self.current_index -= 1
+            return copy.deepcopy(self.history[self.current_index])
+        return None
+
+    def redo(self):
+        """Redo last undone edit."""
+        if self.redo_stack:
+            state = self.redo_stack.pop()
+            self.current_index += 1
+            if self.current_index < len(self.history):
+                self.history[self.current_index] = state
+            else:
+                self.history.append(state)
+            return copy.deepcopy(state)
+        return None
+
+    def can_undo(self):
+        return self.current_index > 0
+
+    def can_redo(self):
+        return len(self.redo_stack) > 0
+
+def apply_graph_edits(nx_graph, concept_abstract_map, valid_concepts, edits):
+    """
+    Apply user edits to the graph.
+    edits dict keys: 'remove_nodes', 'merge_nodes', 'rename_nodes', 'add_edges', 'filter_by_degree', 'filter_by_freq'
+    Returns updated graph, concept_abstract_map, valid_concepts.
+    """
+    G = nx_graph.copy()
+    map_abs = {k: list(v) for k, v in concept_abstract_map.items()}
+    concepts = list(valid_concepts)
+    # 1. Remove nodes
+    for node in edits.get('remove_nodes', []):
+        if node in G:
+            G.remove_node(node)
+            map_abs.pop(node, None)
+            if node in concepts:
+                concepts.remove(node)
+    # 2. Merge nodes
+    for merge_list, new_name in edits.get('merge_nodes', []):
+        if len(merge_list) < 2 or not all(n in G for n in merge_list):
+            continue
+        combined_abstracts = []
+        for n in merge_list:
+            combined_abstracts.extend(map_abs.get(n, []))
+        combined_abstracts = list(set(combined_abstracts))
+        G.add_node(new_name, frequency=len(combined_abstracts))
+        map_abs[new_name] = combined_abstracts
+        neighbors = set()
+        for n in merge_list:
+            neighbors.update(G.neighbors(n))
+        for nb in neighbors:
+            if nb not in merge_list:
+                w = sum(G[n][nb].get('weight', 1) for n in merge_list if G.has_edge(n, nb))
+                G.add_edge(new_name, nb, weight=w, cooccurrence=w, edge_type='cooccurrence')
+        for n in merge_list:
+            G.remove_node(n)
+            map_abs.pop(n, None)
+            if n in concepts:
+                concepts.remove(n)
+        if new_name not in concepts:
+            concepts.append(new_name)
+    # 3. Rename nodes
+    for old, new in edits.get('rename_nodes', []):
+        if old in G and new not in G:
+            adj = dict(G[old])
+            attrs = dict(G.nodes[old])
+            G.add_node(new, **attrs)
+            for nb, data in adj.items():
+                G.add_edge(new, nb, **data)
+            G.remove_node(old)
+            if old in map_abs:
+                map_abs[new] = map_abs.pop(old)
+            if old in concepts:
+                idx = concepts.index(old)
+                concepts[idx] = new
+    # 4. Add edges
+    for u, v, weight in edits.get('add_edges', []):
+        if u in G and v in G and not G.has_edge(u, v):
+            G.add_edge(u, v, weight=weight, cooccurrence=weight, edge_type='user_added')
+    # 5. Filter by degree
+    min_degree = edits.get('filter_by_degree', 0)
+    if min_degree > 0:
+        nodes_to_remove = [n for n in G.nodes() if G.degree(n) < min_degree]
+        for node in nodes_to_remove:
+            G.remove_node(node)
+            map_abs.pop(node, None)
+            if node in concepts:
+                concepts.remove(node)
+    # 6. Filter by frequency
+    min_freq = edits.get('filter_by_freq', 0)
+    if min_freq > 0:
+        nodes_to_remove = [n for n in G.nodes() if len(map_abs.get(n, [])) < min_freq]
+        for node in nodes_to_remove:
+            if node in G:
+                G.remove_node(node)
+                map_abs.pop(node, None)
+                if node in concepts:
+                    concepts.remove(node)
+    return G, map_abs, concepts
+
+# ==============================================================================
+# ENHANCED VISUALIZATION FUNCTIONS
+# ==============================================================================
 def get_nanomaterials_category_color(concept: str, cmap_colors: Optional[List[str]] = None) -> str:
     if cmap_colors:
         return cmap_colors[hash(concept) % len(cmap_colors)]
     concept_lower = concept.lower()
-    # Core materials & Defects
-    if any(c in concept_lower for c in ['defect engineered ag', 'defective ag', 'vacancy rich ag']):
-        return "#D32F2F"  # Red
-    elif any(c in concept_lower for c in ['nanotwinned ag', 'twinned ag', 'twin boundary', 'twin density']):
-        return "#E91E63"  # Pink
-    elif any(c in concept_lower for c in ['isf', 'est', 'stacking fault', 'stacking faulted']):
-        return "#9C27B0"  # Purple
-    elif any(c in concept_lower for c in ['point defect', 'dislocation', 'crystallographic defect']):
-        return "#FF9800"  # Orange
-    # Applications
-    elif any(c in concept_lower for c in ['sers', 'hot spot', 'plasmon', 'lspr']):
-        return "#F44336"  # Red-Orange
-    elif any(c in concept_lower for c in ['catalytic', 'electrocatalysis', 'photocatalysis', 'co2rr', 'orr', 'oer', 'her']):
-        return "#00E676"  # Bright Green
-    elif any(c in concept_lower for c in ['antibacterial', 'antimicrobial', 'bioimaging', 'theranostics', 'wound']):
-        return "#8E24AA"  # Deep Purple
-    elif any(c in concept_lower for c in ['biosensor', 'chemical sensor', 'gas sensor', 'sensing']):
-        return "#18FFFF"  # Cyan accent
-    # Synthesis & Characterization
-    elif any(c in concept_lower for c in ['chemical reduction', 'polyol', 'seed mediated', 'galvanic', 'plasma', 'irradiation']):
-        return "#00BCD4"  # Cyan
-    elif any(c in concept_lower for c in ['hrtem', 'stem', 'haadf', 'eels', 'xrd', 'saed', 'uv-vis', 'xps']):
-        return "#3F51B5"  # Indigo
-    # Computational
-    elif any(c in concept_lower for c in ['dft', 'fdtd', 'dda', 'md', 'molecular dynamics', 'comsol', 'lumerical']):
-        return "#4CAF50"  # Green
+    if any(c in concept_lower for c in ['cu@ag', 'ag@cu', 'cu/ag', 'ag/cu', 'core shell']):
+        return "#1976D2"
+    elif any(c in concept_lower for c in ['bimetallic', 'cu ag', 'ag cu', 'copper silver']):
+        return "#0D47A1"
+    elif any(c in concept_lower for c in ['lattice mismatch', 'misfit strain', 'interfacial strain', 'epitaxial', 'coherency']):
+        return "#E91E63"
+    elif any(c in concept_lower for c in ['shell thickness', 'core diameter', 'core size', 'morphology', 'dimension']):
+        return "#9C27B0"
+    elif any(c in concept_lower for c in ['interdiffusion', 'kirkendall', 'void formation', 'diffusion']):
+        return "#FF9800"
+    elif any(c in concept_lower for c in ['surface plasmon', 'lspr', 'sers', 'hot spot', 'extinction', 'plasmon peak']):
+        return "#F44336"
+    elif any(c in concept_lower for c in ['uv vis', 'absorption spectrum', 'refractive index']):
+        return "#FF5722"
+    elif any(c in concept_lower for c in ['seed mediated', 'galvanic', 'co-reduction', 'polyol', 'chemical reduction']):
+        return "#00BCD4"
+    elif any(c in concept_lower for c in ['pvp', 'ctab', 'oleylamine', 'oleic acid', 'capping agent', 'surfactant', 'ligand']):
+        return "#009688"
+    elif any(c in concept_lower for c in ['haadf', 'stem eds', 'tem eds', 'elemental mapping', 'line profile', 'eels']):
+        return "#3F51B5"
+    elif any(c in concept_lower for c in ['xrd', 'xps', 'dls', 'zeta', 'saxs', 'exafs', 'uv vis']):
+        return "#795548"
+    elif any(c in concept_lower for c in ['fdtd', 'dda', 'mie theory', 'comsol', 'lumerical', 'dft', 'molecular dynamics']):
+        return "#4CAF50"
+    elif any(c in concept_lower for c in ['catalytic', 'electrocatalysis', 'photocatalysis', 'synergistic']):
+        return "#8BC34A"
+    elif any(c in concept_lower for c in ['antibacterial', 'antimicrobial', 'bactericidal', 'cytotoxicity', 'biocompatibility']):
+        return "#8E24AA"
+    elif any(c in concept_lower for c in ['electrical conductivity', 'sheet resistance', 'conductive ink', 'interconnect']):
+        return "#FFC107"
+    elif any(c in concept_lower for c in ['thermal conductivity', 'thermal stability', 'thermal interface']):
+        return "#FFEB3B"
+    elif any(c in concept_lower for c in ['biosensor', 'chemical sensor', 'gas sensor', 'photothermal']):
+        return "#00E676"
     else:
-        return "#9E9E9E"  # Grey
+        return "#9E9E9E"
 
 def render_graph_pyvis(nx_graph, concept_abstract_map, physics_enabled=True,
-                        min_node_size=8, max_node_size=40, cmap_name="viridis",
-                        custom_labels=None, node_label_size=12, top_n_nodes=0,
-                        theme=None, physics_preset=None):
+                       min_node_size=8, max_node_size=40, cmap_name="viridis",
+                       custom_labels=None, node_label_size=12, top_n_nodes=0,
+                       theme=None, physics_preset=None):
     if top_n_nodes > 0 and len(nx_graph.nodes()) > top_n_nodes:
         degrees = dict(nx_graph.degree(weight='weight'))
         top_nodes = sorted(degrees.keys(), key=lambda x: degrees[x], reverse=True)[:top_n_nodes]
         nx_graph = nx_graph.subgraph(top_nodes).copy()
-
+    if len(nx_graph.nodes()) == 0:
+        st.info("No nodes to display in graph.")
+        return
     if theme is None:
         theme = THEME_PRESETS["Bright (Default)"]
     if physics_preset is None:
         physics_preset = PHYSICS_PRESETS["Stable (Default)"]
-
     pos = {}
     if len(nx_graph.nodes()) > 0:
         try:
@@ -934,62 +1538,56 @@ def render_graph_pyvis(nx_graph, concept_abstract_map, physics_enabled=True,
                 pos = nx.spring_layout(nx_graph, k=2.5, iterations=200, seed=42, weight='weight')
         except Exception:
             pos = nx.spring_layout(nx_graph, k=2.5, iterations=200, seed=42, weight='weight')
-
     cmap_colors = get_colormap_colors(cmap_name, max(1, len(nx_graph.nodes())))
-
     net = Network(
         height="780px", width="100%", bgcolor=theme['bg'], font_color=theme['font'],
         select_menu=True, notebook=False, cdn_resources='remote'
     )
-
     if physics_enabled and physics_preset.get("gravity", 0) != 0:
         net.set_options(f"""
         var options = {{
-          "physics": {{
-            "enabled": true,
-            "solver": "barnesHut",
-            "barnesHut": {{
-              "gravitationalConstant": {physics_preset['gravity']},
-              "centralGravity": {physics_preset['central_gravity']},
-              "springLength": {physics_preset['spring_length']},
-              "springConstant": {physics_preset['spring_strength']},
-              "damping": {physics_preset['damping']},
-              "overlap": 0.15
+            "physics": {{
+                "enabled": true,
+                "solver": "barnesHut",
+                "barnesHut": {{
+                    "gravitationalConstant": {physics_preset['gravity']},
+                    "centralGravity": {physics_preset['central_gravity']},
+                    "springLength": {physics_preset['spring_length']},
+                    "springConstant": {physics_preset['spring_strength']},
+                    "damping": {physics_preset['damping']},
+                    "overlap": 0.15
+                }},
+                "stabilization": {{
+                    "enabled": true,
+                    "iterations": {physics_preset['stabilization']},
+                    "updateInterval": 30,
+                    "onlyDynamicEdges": false,
+                    "fit": true
+                }}
             }},
-            "stabilization": {{
-              "enabled": true,
-              "iterations": {physics_preset['stabilization']},
-              "updateInterval": 30,
-              "onlyDynamicEdges": false,
-              "fit": true
+            "interaction": {{
+                "hover": true,
+                "tooltipDelay": 180,
+                "hideEdgesOnDrag": false,
+                "zoomView": true,
+                "dragView": true
             }}
-          }},
-          "interaction": {{
-            "hover": true,
-            "tooltipDelay": 180,
-            "hideEdgesOnDrag": false,
-            "zoomView": true,
-            "dragView": true
-          }}
         }}
         """)
     else:
         net.set_options("""
         var options = {
-          "physics": { "enabled": false },
-          "interaction": { "hover": true, "dragNodes": true, "dragView": true, "zoomView": true }
+            "physics": { "enabled": false },
+            "interaction": { "hover": true, "dragNodes": true, "dragView": true, "zoomView": true }
         }
         """)
-
     for i, node in enumerate(nx_graph.nodes()):
         freq = len(concept_abstract_map.get(node, []))
         size = int(np.clip(min_node_size + freq * 1.2, min_node_size, max_node_size))
         color = get_nanomaterials_category_color(node, cmap_colors)
         degree = int(nx_graph.degree(node))
         label = custom_labels.get(node, node) if custom_labels else node
-
         x, y = (pos.get(node, (0, 0))[0] * 1200, pos.get(node, (0, 0))[1] * 1200)
-
         net.add_node(
             node,
             label=label,
@@ -1028,20 +1626,18 @@ def render_graph_pyvis(nx_graph, concept_abstract_map, physics_enabled=True,
             shape='dot',
             mass=max(1, 1 + freq * 0.05)
         )
-
     color_map = {
         'cooccurrence': theme['edge_cooccurrence'],
         'semantic':     theme['edge_semantic'],
         'bridge':       theme['edge_bridge'],
+        'user_added':   '#FF00FF',
         'unknown':      theme['edge_unknown']
     }
-
     for u, v in nx_graph.edges():
         w = nx_graph[u][v].get('weight', 1)
         edge_type = nx_graph[u][v].get('edge_type', 'unknown')
         color = color_map.get(edge_type, color_map['unknown'])
         width = float(np.clip(w * 0.4, 0.8, 3.5))
-
         net.add_edge(
             u, v,
             value=float(np.clip(w, 0.5, 5)),
@@ -1055,64 +1651,63 @@ def render_graph_pyvis(nx_graph, concept_abstract_map, physics_enabled=True,
             smooth={'type': 'continuous', 'roundness': 0.35},
             title=f"<span style='font-family:Inter,sans-serif;'>Weight: <b>{w:.2f}</b><br>Type: {edge_type}</span>"
         )
-
     html_content = net.generate_html()
-
     custom_css = f"""
     <style>
-        body {{
-            background: {theme['bg']};
-            margin: 0;
-            padding: 0;
-            font-family: 'Inter', 'Segoe UI', sans-serif;
-        }}
-        #mynetwork {{
-            border-radius: 16px;
-            box-shadow: 0 12px 48px {theme['shadow_color']};
-            outline: none;
-        }}
-        div.vis-tooltip {{
-            background: {theme['tooltip_bg']} !important;
-            color: {theme['tooltip_text']} !important;
-            border: 1px solid {theme['tooltip_border']} !important;
-            border-radius: 10px !important;
-            padding: 14px 18px !important;
-            font-family: 'Inter', 'Segoe UI', sans-serif !important;
-            font-size: 13px !important;
-            line-height: 1.5 !important;
-            box-shadow: 0 8px 32px {theme['shadow_color']} !important;
-            max-width: 320px !important;
-            white-space: normal !important;
-        }}
-        div.vis-network div.vis-manipulation {{
-            background: {theme['tooltip_bg']} !important;
-            border-top: 1px solid {theme['tooltip_border']} !important;
-            color: {theme['font']} !important;
-        }}
+    body {{
+        background: {theme['bg']};
+        margin: 0;
+        padding: 0;
+        font-family: 'Inter', 'Segoe UI', sans-serif;
+    }}
+    #mynetwork {{
+        border-radius: 16px;
+        box-shadow: 0 12px 48px {theme['shadow_color']};
+        outline: none;
+    }}
+    div.vis-tooltip {{
+        background: {theme['tooltip_bg']} !important;
+        color: {theme['tooltip_text']} !important;
+        border: 1px solid {theme['tooltip_border']} !important;
+        border-radius: 10px !important;
+        padding: 14px 18px !important;
+        font-family: 'Inter', 'Segoe UI', sans-serif !important;
+        font-size: 13px !important;
+        line-height: 1.5 !important;
+        box-shadow: 0 8px 32px {theme['shadow_color']} !important;
+        max-width: 320px !important;
+        white-space: normal !important;
+    }}
+    div.vis-network div.vis-manipulation {{
+        background: {theme['tooltip_bg']} !important;
+        border-top: 1px solid {theme['tooltip_border']} !important;
+        color: {theme['font']} !important;
+    }}
     </style>
     """
     html_content = html_content.replace('</head>', custom_css + '</head>')
-
     st.components.v1.html(html_content, height=790, scrolling=True)
-
     try:
         html_bytes = html_content.encode('utf-8')
         st.download_button("📥 Download Interactive Graph (HTML)", data=html_bytes,
-                          file_name="defect_ag_concept_graph.html", mime="text/html")
+                           file_name="core_shell_agcu_concept_graph.html", mime="text/html")
         del html_content, html_bytes
         gc.collect()
     except Exception as e:
         st.error(f"Download preparation failed: {e}")
 
 def render_graph_plotly_2d(nx_graph, concept_abstract_map, cmap_name="viridis",
-                            custom_labels=None, top_n_nodes=0, node_label_size=10,
-                            theme=None):
+                           custom_labels=None, top_n_nodes=0, node_label_size=10,
+                           theme=None):
     if theme is None:
         theme = THEME_PRESETS["Bright (Default)"]
     if top_n_nodes > 0 and len(nx_graph.nodes()) > top_n_nodes:
         degrees = dict(nx_graph.degree())
         top_nodes = sorted(degrees.keys(), key=lambda x: degrees[x], reverse=True)[:top_n_nodes]
         nx_graph = nx_graph.subgraph(top_nodes).copy()
+    if len(nx_graph.nodes()) == 0:
+        st.info("No nodes to display.")
+        return
     pos = nx.spring_layout(nx_graph, k=1.5, iterations=50, seed=42)
     cmap_colors = get_colormap_colors(cmap_name, len(nx_graph.nodes()))
     edge_x, edge_y, edge_hover = [], [], []
@@ -1137,7 +1732,7 @@ def render_graph_plotly_2d(nx_graph, concept_abstract_map, cmap_name="viridis",
         node_labels.append(custom_labels.get(node, node) if custom_labels else node)
     node_trace = go.Scatter(x=node_x, y=node_y, mode='markers+text',
                             marker=dict(size=node_size, color=node_color,
-                                       line=dict(width=2, color=theme['node_border'])),
+                                        line=dict(width=2, color=theme['node_border'])),
                             text=node_labels, textposition="bottom center",
                             textfont=dict(size=node_label_size, color=theme['font']),
                             hovertext=node_text, hoverinfo='text', name='Concepts')
@@ -1153,7 +1748,7 @@ def render_graph_plotly_2d(nx_graph, concept_abstract_map, cmap_name="viridis",
     st.plotly_chart(fig, use_container_width=True)
 
 def render_graph_plotly_3d(nx_graph, concept_abstract_map, cmap_name="viridis", top_n_nodes=0,
-                            theme=None):
+                           theme=None):
     if theme is None:
         theme = THEME_PRESETS["Bright (Default)"]
     if len(nx_graph.nodes()) < 3:
@@ -1163,6 +1758,9 @@ def render_graph_plotly_3d(nx_graph, concept_abstract_map, cmap_name="viridis", 
         degrees = dict(nx_graph.degree())
         top_nodes = sorted(degrees.keys(), key=lambda x: degrees[x], reverse=True)[:top_n_nodes]
         nx_graph = nx_graph.subgraph(top_nodes).copy()
+    if len(nx_graph.nodes()) == 0:
+        st.info("No nodes to display.")
+        return
     pos_3d = nx.spring_layout(nx_graph, dim=3, seed=42)
     cmap_colors = get_colormap_colors(cmap_name, len(nx_graph.nodes()))
     edge_x, edge_y, edge_z = [], [], []
@@ -1181,14 +1779,14 @@ def render_graph_plotly_3d(nx_graph, concept_abstract_map, cmap_name="viridis", 
         node_color.append(cmap_colors[i])
         node_labels.append(node)
     node_trace = go.Scatter3d(x=node_x, y=node_y, z=node_z, mode='markers+text',
-                                marker=dict(size=node_size, color=node_color, opacity=0.9),
-                                text=node_labels, textposition="top center",
-                                textfont=dict(size=8, color=theme['font']),
-                                hovertext=node_text, hoverinfo='text')
+                              marker=dict(size=node_size, color=node_color, opacity=0.9),
+                              text=node_labels, textposition="top center",
+                              textfont=dict(size=8, color=theme['font']),
+                              hovertext=node_text, hoverinfo='text')
     fig = go.Figure(data=[edge_trace, node_trace],
                     layout=go.Layout(scene=dict(xaxis=dict(showbackground=False, gridcolor=theme['grid_color'], linecolor=theme['axis_color']),
-                                                 yaxis=dict(showbackground=False, gridcolor=theme['grid_color'], linecolor=theme['axis_color']),
-                                                 zaxis=dict(showbackground=False, gridcolor=theme['grid_color'], linecolor=theme['axis_color'])),
+                                                yaxis=dict(showbackground=False, gridcolor=theme['grid_color'], linecolor=theme['axis_color']),
+                                                zaxis=dict(showbackground=False, gridcolor=theme['grid_color'], linecolor=theme['axis_color'])),
                                      margin=dict(l=0, r=0, b=0, t=0), showlegend=False,
                                      paper_bgcolor=theme['plotly_paper']))
     st.plotly_chart(fig, use_container_width=True)
@@ -1196,6 +1794,9 @@ def render_graph_plotly_3d(nx_graph, concept_abstract_map, cmap_name="viridis", 
 def render_graph_fallback(nx_graph, concept_abstract_map, theme=None):
     if theme is None:
         theme = THEME_PRESETS["Bright (Default)"]
+    if len(nx_graph.nodes()) == 0:
+        st.info("No graph data to display.")
+        return
     st.markdown(f"### 📊 Graph Summary (Text View)")
     st.markdown(f"- **Nodes**: {len(nx_graph.nodes())}")
     st.markdown(f"- **Edges**: {len(nx_graph.edges())}")
@@ -1212,14 +1813,288 @@ def render_graph_fallback(nx_graph, concept_abstract_map, theme=None):
         st.markdown("**📈 Top Concepts by Frequency:**")
         st.dataframe(pd.DataFrame(freq_data[:15], columns=["Concept", "Abstract Count"]), use_container_width=True)
 
-# ==========================================
+# ==============================================================================
+# NEW INNOVATIVE VISUALIZATIONS
+# ==============================================================================
+def render_timeline(df_filtered, concept_abstract_map, valid_concepts, year_col='Year'):
+    """Display concept frequency over time as interactive line chart."""
+    if year_col not in df_filtered.columns:
+        st.info("No 'Year' column found. Timeline unavailable.")
+        return
+    df_years = df_filtered[df_filtered[year_col].notna()].copy()
+    if df_years.empty:
+        st.info("No valid years in data.")
+        return
+    df_years[year_col] = pd.to_numeric(df_years[year_col], errors="coerce")
+    df_years = df_years.dropna(subset=[year_col])
+    if df_years.empty:
+        return
+    abs_year = {i: y for i, y in df_years[year_col].items() if i < len(df_filtered)}
+    years = sorted(set(abs_year.values()))
+    if len(years) < 2:
+        st.info("Need at least 2 distinct years for timeline.")
+        return
+    concept_year_counts = defaultdict(lambda: defaultdict(int))
+    for concept, abs_list in concept_abstract_map.items():
+        if concept not in valid_concepts:
+            continue
+        for idx in abs_list:
+            if idx in abs_year:
+                concept_year_counts[concept][abs_year[idx]] += 1
+    data = []
+    for concept, year_dict in concept_year_counts.items():
+        for y in years:
+            data.append({'concept': concept, 'year': y, 'count': year_dict.get(y, 0)})
+    df_timeline = pd.DataFrame(data)
+    if df_timeline.empty or df_timeline['count'].sum() == 0:
+        st.info("No timeline data.")
+        return
+    total_freq = df_timeline.groupby('concept')['count'].sum().sort_values(ascending=False)
+    if len(total_freq) == 0:
+        st.info("No concept frequency data for timeline.")
+        return
+    top_k = st.slider("Select top K concepts for timeline", 3, min(30, len(total_freq)), min(10, len(total_freq)), key='timeline_k')
+    top_concepts = total_freq.head(top_k).index.tolist()
+    df_plot = df_timeline[df_timeline['concept'].isin(top_concepts)]
+    fig = px.line(df_plot, x='year', y='count', color='concept', markers=True,
+                  title='Concept Frequency Over Time (Top K)',
+                  labels={'count': 'Number of Abstracts', 'year': 'Year'})
+    fig.update_layout(legend=dict(orientation='h', yanchor='bottom', y=-0.3))
+    st.plotly_chart(fig, use_container_width=True)
+
+def render_cooccurrence_heatmap(nx_graph, valid_concepts, concept_abstract_map, top_n=30):
+    """Heatmap of co-occurrence counts for top concepts."""
+    if len(valid_concepts) < 3:
+        st.info("Not enough concepts for heatmap.")
+        return
+    freq = {c: len(concept_abstract_map.get(c, [])) for c in valid_concepts}
+    top = sorted(freq.items(), key=lambda x: x[1], reverse=True)[:top_n]
+    top_concepts = [c for c, _ in top]
+    matrix = np.zeros((len(top_concepts), len(top_concepts)))
+    for i, u in enumerate(top_concepts):
+        for j, v in enumerate(top_concepts):
+            if i == j:
+                matrix[i,j] = 0
+            else:
+                u_abs = set(concept_abstract_map.get(u, []))
+                v_abs = set(concept_abstract_map.get(v, []))
+                matrix[i,j] = len(u_abs & v_abs)
+    if matrix.max() == 0:
+        st.info("No co-occurrence data for heatmap.")
+        return
+    fig = px.imshow(matrix, x=top_concepts, y=top_concepts,
+                    title='Co-occurrence Heatmap (Top Concepts)',
+                    color_continuous_scale='Blues',
+                    labels=dict(x='Concept', y='Concept', color='Co-occurrence'))
+    fig.update_layout(xaxis=dict(tickangle=45), height=700)
+    st.plotly_chart(fig, use_container_width=True)
+
+def render_tsne_projection(valid_concepts, embed_model, concept_abstract_map, cmap_name='viridis'):
+    """t-SNE projection of concept embeddings with category coloring."""
+    if len(valid_concepts) < 5:
+        st.info("Need at least 5 concepts for t-SNE.")
+        return
+    st.info("Computing t-SNE (may take a few seconds)...")
+    try:
+        embeddings = embed_model.encode(valid_concepts, show_progress_bar=False, batch_size=64)
+        tsne = TSNE(n_components=2, perplexity=min(30, len(valid_concepts)-1), random_state=42)
+        coords = tsne.fit_transform(embeddings)
+        categories = [abstract_concepts_to_categories([c]).get(c, 'general') for c in valid_concepts]
+        freqs = [len(concept_abstract_map.get(c, [])) for c in valid_concepts]
+        df_tsne = pd.DataFrame({
+            'concept': valid_concepts, 'x': coords[:,0], 'y': coords[:,1],
+            'category': categories, 'frequency': freqs
+        })
+        # Clean any NaN/inf values
+        df_tsne = df_tsne.replace([np.inf, -np.inf], np.nan).dropna()
+        if df_tsne.empty:
+            st.info("t-SNE produced no valid data.")
+            return
+        unique_cats = df_tsne['category'].unique()
+        fig = px.scatter(df_tsne, x='x', y='y', color='category', size='frequency',
+                         hover_name='concept',
+                         title='t-SNE Projection of Concept Embeddings',
+                         labels={'x':'t-SNE 1', 'y':'t-SNE 2'},
+                         size_max=20,
+                         color_discrete_sequence=get_colormap_colors(cmap_name, max(1, len(unique_cats))))
+        st.plotly_chart(fig, use_container_width=True)
+    except Exception as e:
+        st.error(f"t-SNE failed: {e}")
+
+def render_community_detection(nx_graph, valid_concepts):
+    """Detect communities and visualize with distinct colors."""
+    if nx_graph.number_of_nodes() < 5:
+        st.info("Graph too small for community detection (need ≥5 nodes).")
+        return
+    try:
+        from networkx.algorithms import community
+        comms = list(community.greedy_modularity_communities(nx_graph))
+        comm_map = {}
+        for i, comm in enumerate(comms):
+            for node in comm:
+                comm_map[node] = i
+        G = nx_graph.copy()
+        colors = get_colormap_colors('tab20', max(1, len(comms)))
+        node_colors = [colors[comm_map.get(n, 0) % len(colors)] for n in G.nodes()]
+        try:
+            pos = nx.spring_layout(G, seed=42)
+        except Exception:
+            st.error("Could not compute layout for community visualization.")
+            return
+        fig, ax = plt.subplots(figsize=(12,10))
+        nx.draw(G, pos, node_color=node_colors, with_labels=True, ax=ax,
+                node_size=400, font_size=8, edge_color='gray', alpha=0.7)
+        ax.set_title('Community Structure (Modularity)', fontsize=14, fontweight='bold')
+        st.pyplot(fig)
+        plt.close()
+    except Exception as e:
+        st.error(f"Community detection failed: {e}")
+
+def render_concept_growth(df_filtered, concept_abstract_map, valid_concepts, year_col='Year'):
+    """Compute and visualize concept growth rates over time."""
+    if year_col not in df_filtered.columns:
+        st.info("No Year column. Growth analysis unavailable.")
+        return
+    df_years = df_filtered[df_filtered[year_col].notna()].copy()
+    if df_years.empty:
+        return
+    df_years[year_col] = pd.to_numeric(df_years[year_col], errors="coerce")
+    df_years = df_years.dropna(subset=[year_col])
+    if df_years.empty:
+        return
+    min_year = df_years[year_col].min()
+    max_year = df_years[year_col].max()
+    if max_year - min_year < 1:
+        st.info("Insufficient year range.")
+        return
+    abs_year = {i: y for i, y in df_years[year_col].items() if i < len(df_filtered)}
+    concept_years = defaultdict(list)
+    for concept, abs_list in concept_abstract_map.items():
+        if concept not in valid_concepts:
+            continue
+        for idx in abs_list:
+            if idx in abs_year:
+                concept_years[concept].append(abs_year[idx])
+    growth_data = []
+    for concept, years in concept_years.items():
+        if not years:
+            continue
+        year_counts = Counter(years)
+        early_count = sum(year_counts.get(y, 0) for y in range(int(min_year), int(min_year)+2))
+        late_count = sum(year_counts.get(y, 0) for y in range(int(max_year)-1, int(max_year)+1))
+        if early_count == 0 and late_count == 0:
+            growth = 0.0
+        else:
+            growth = float(late_count - early_count) / max(early_count + 1, 1)
+        total = len(years)
+        growth_data.append({'concept': concept, 'growth': growth, 'total': total})
+    df_growth = pd.DataFrame(growth_data)
+    if df_growth.empty:
+        return
+    df_growth = df_growth.sort_values('growth', ascending=False).head(30)
+    fig = px.bar(df_growth, x='concept', y='growth', color='total',
+                 title='Concept Growth Rate (Recent vs Early)',
+                 labels={'growth': 'Growth Rate', 'total': 'Total Frequency'},
+                 color_continuous_scale='RdYlGn')
+    fig.update_layout(xaxis=dict(tickangle=45))
+    st.plotly_chart(fig, use_container_width=True)
+
+def render_bubble_chart(valid_concepts, concept_abstract_map, nx_graph):
+    """Bubble chart: x=degree, y=frequency, size=efficiency, color=category."""
+    if len(valid_concepts) < 3:
+        return
+    freq = [len(concept_abstract_map.get(c, [])) for c in valid_concepts]
+    degree = [nx_graph.degree(c) for c in valid_concepts]
+    # Ensure efficiency is always positive for Plotly size scaling
+    eff = [max(0.1, f * np.log1p(max(d, 0.1))) for f, d in zip(freq, degree)]
+    categories = [abstract_concepts_to_categories([c]).get(c, 'general') for c in valid_concepts]
+    df_bubble = pd.DataFrame({
+        'concept': valid_concepts, 'frequency': freq, 'degree': degree,
+        'efficiency': eff, 'category': categories
+    })
+    # Drop any rows with NaN/inf that could break Plotly
+    df_bubble = df_bubble.replace([np.inf, -np.inf], np.nan).dropna()
+    if df_bubble.empty:
+        st.info("Not enough data for bubble chart.")
+        return
+    n_cats = len(df_bubble['category'].unique())
+    fig = px.scatter(df_bubble, x='degree', y='frequency', size='efficiency',
+                     color='category', hover_name='concept',
+                     title='Concept Landscape: Degree vs Frequency',
+                     labels={'degree':'Degree (connectivity)', 'frequency':'Abstract Frequency'},
+                     size_max=30,
+                     color_discrete_sequence=get_colormap_colors('viridis', max(1, n_cats)))
+    st.plotly_chart(fig, use_container_width=True)
+
+def render_degree_distribution(nx_graph):
+    """Plot degree distribution with power-law fit."""
+    degrees = [d for n, d in nx_graph.degree()]
+    if not degrees or max(degrees) == 0:
+        st.info("No degree data available.")
+        return
+    fig = make_subplots(rows=1, cols=2, subplot_titles=("Degree Distribution", "Log-Log Degree Distribution"))
+    # Histogram
+    fig.add_trace(go.Histogram(x=degrees, nbinsx=30, marker_color='steelblue', name='Degree'), row=1, col=1)
+    # Log-log
+    degree_counts = Counter(degrees)
+    x_vals = sorted(degree_counts.keys())
+    y_vals = [degree_counts[x] for x in x_vals]
+    fig.add_trace(go.Scatter(x=x_vals, y=y_vals, mode='markers', marker_color='crimson', name='Log-Log'), row=1, col=2)
+    fig.update_xaxes(type="log", row=1, col=2)
+    fig.update_yaxes(type="log", row=1, col=2)
+    fig.update_layout(title_text="Network Degree Distribution Analysis", showlegend=False, height=400)
+    st.plotly_chart(fig, use_container_width=True)
+
+def render_centrality_comparison(nx_graph, valid_concepts, concept_abstract_map):
+    """Compare different centrality metrics side by side."""
+    if nx_graph.number_of_nodes() < 3:
+        return
+    try:
+        degree_cent = nx.degree_centrality(nx_graph)
+        betweenness_cent = nx.betweenness_centrality(nx_graph, normalized=True, k=min(100, nx_graph.number_of_nodes()))
+        closeness_cent = nx.closeness_centrality(nx_graph)
+        eigenvector_cent = nx.eigenvector_centrality(nx_graph, max_iter=1000)
+        if not eigenvector_cent:
+            st.info("Eigenvector centrality could not be computed.")
+            return
+        df_cent = pd.DataFrame({
+            'concept': list(nx_graph.nodes()),
+            'degree': [degree_cent.get(n, 0) for n in nx_graph.nodes()],
+            'betweenness': [betweenness_cent.get(n, 0) for n in nx_graph.nodes()],
+            'closeness': [closeness_cent.get(n, 0) for n in nx_graph.nodes()],
+            'eigenvector': [eigenvector_cent.get(n, 0) for n in nx_graph.nodes()],
+            'frequency': [len(concept_abstract_map.get(n, [])) for n in nx_graph.nodes()]
+        })
+        # Correlation heatmap
+        corr_cols = ['degree', 'betweenness', 'closeness', 'eigenvector', 'frequency']
+        corr_matrix = df_cent[corr_cols].corr()
+        fig = make_subplots(rows=1, cols=2,
+                            subplot_titles=("Centrality Correlation Matrix", "Top 15 by Eigenvector Centrality"),
+                            specs=[[{"type": "heatmap"}, {"type": "bar"}]])
+        fig.add_trace(go.Heatmap(z=corr_matrix.values, x=corr_cols, y=corr_cols,
+                                 colorscale='RdBu', zmid=0), row=1, col=1)
+        top_eigen = df_cent.nlargest(15, 'eigenvector')
+        fig.add_trace(go.Bar(x=top_eigen['concept'], y=top_eigen['eigenvector'],
+                             marker_color='teal'), row=1, col=2)
+        fig.update_xaxes(tickangle=45, row=1, col=2)
+        fig.update_layout(height=500, showlegend=False)
+        st.plotly_chart(fig, use_container_width=True)
+    except Exception as e:
+        st.error(f"Centrality analysis failed: {e}")
+
+# ==============================================================================
 # SUNBURST & RADAR CHARTS
-# ==========================================
-def build_category_hierarchy(valid_concepts: List[str], concept_abstract_map: Dict, top_n_per_category: int = 40):
+# ==============================================================================
+def build_category_hierarchy(valid_concepts: List[str], concept_abstract_map: Dict, top_n_per_category: int = 40,
+                             categories_filter=None):
+    if not valid_concepts:
+        return [], [], []
     hierarchy = defaultdict(lambda: {"children": [], "count": 0})
     category_map = abstract_concepts_to_categories(valid_concepts)
     for concept in valid_concepts:
         category = category_map.get(concept, 'general')
+        if categories_filter and category not in categories_filter:
+            continue
         freq = len(concept_abstract_map.get(concept, []))
         hierarchy[category]["children"].append((concept, freq))
         hierarchy[category]["count"] += freq
@@ -1237,10 +2112,13 @@ def build_category_hierarchy(valid_concepts: List[str], concept_abstract_map: Di
             labels.append(child); parents.append(parent); values.append(cnt)
     return labels, parents, values
 
-def render_sunburst_chart(labels, parents, values, cmap_name="viridis", label_size=11, width=800, height=600, theme=None):
+def render_sunburst_chart(labels, parents, values, cmap_name="viridis", label_size=11, width=800, height=600, theme=None,
+                          branchvalues='total'):
     if not labels or len(labels) < 2:
         st.info("Not enough categories for sunburst chart.")
         return
+    # Ensure all values are positive for sunburst
+    values = [max(0.1, float(v)) if v is not None else 0.1 for v in values]
     n_items = len(labels)
     use_remainder = n_items > 80
     unique_ids = []; seen = {}
@@ -1263,7 +2141,7 @@ def render_sunburst_chart(labels, parents, values, cmap_name="viridis", label_si
             else:
                 parent_ids.append("")
     colors = get_colormap_colors(cmap_name, len(unique_ids))
-    branchvalues = "remainder" if use_remainder else "total"
+    branchvalues = "remainder" if use_remainder else branchvalues
     fig = go.Figure(go.Sunburst(
         labels=unique_ids, parents=parent_ids, values=values, ids=unique_ids,
         branchvalues=branchvalues,
@@ -1274,7 +2152,7 @@ def render_sunburst_chart(labels, parents, values, cmap_name="viridis", label_si
         hovertemplate='<b>%{label}</b><br>Value: %{value}<br>Parent: %{parent}<extra></extra>'
     ))
     fig.update_layout(
-        title="<b>Defect-Engineered Ag Nanoparticles & Applications Domain Hierarchy</b><br><i>Size = concept frequency</i>",
+        title="<b>Core-Shell Ag-Cu Nanostructure Domain Hierarchy</b><br><i>Size = concept frequency</i>",
         font=dict(size=label_size, family="Arial"),
         paper_bgcolor="white", plot_bgcolor="white",
         width=width, height=height,
@@ -1283,7 +2161,7 @@ def render_sunburst_chart(labels, parents, values, cmap_name="viridis", label_si
     st.plotly_chart(fig, use_container_width=True)
 
 def render_radar_chart(concept_scores_df: pd.DataFrame, top_k: int = 15, cmap_name: str = "viridis", theme=None):
-    if concept_scores_df.empty or len(concept_scores_df) < 2:
+    if concept_scores_df is None or concept_scores_df.empty or len(concept_scores_df) < 2:
         st.info("Not enough concepts for radar chart.")
         return
     metrics = ['frequency', 'semantic_density', 'coherence_score', 'distillation_efficiency']
@@ -1322,9 +2200,9 @@ def render_radar_chart(concept_scores_df: pd.DataFrame, top_k: int = 15, cmap_na
     )
     st.plotly_chart(fig, use_container_width=True)
 
-# ==========================================
+# ==============================================================================
 # EXPORT FUNCTIONS
-# ==========================================
+# ==============================================================================
 def export_graph(nx_graph, concept_abstract_map, format_type: str):
     if format_type == "GraphML":
         try:
@@ -1333,6 +2211,10 @@ def export_graph(nx_graph, concept_abstract_map, format_type: str):
             nx.write_graphml(nx_graph, "nano_graph.graphml")
         with open("nano_graph.graphml", "rb") as f:
             return f.read(), "application/graphml+xml", "nano_graph.graphml"
+    elif format_type == "GEXF":
+        nx.write_gexf(nx_graph, "nano_graph.gexf")
+        with open("nano_graph.gexf", "rb") as f:
+            return f.read(), "application/xml", "nano_graph.gexf"
     elif format_type == "JSON":
         data = nx.node_link_data(nx_graph)
         json_str = json.dumps(data, indent=2, default=str)
@@ -1360,7 +2242,7 @@ def export_graph(nx_graph, concept_abstract_map, format_type: str):
             plt.figure(figsize=(14, 12), dpi=300)
             node_colors = [get_nanomaterials_category_color(n) for n in nx_graph.nodes()]
             nx.draw(nx_graph, pos, with_labels=True, node_color=node_colors, edge_color='gray',
-                   node_size=400, font_size=7, font_weight='bold', edgecolors='white', linewidths=1)
+                    node_size=400, font_size=7, font_weight='bold', edgecolors='white', linewidths=1)
             import io
             buf = io.BytesIO()
             plt.savefig(buf, format='png', dpi=300, bbox_inches='tight', facecolor='white')
@@ -1369,19 +2251,35 @@ def export_graph(nx_graph, concept_abstract_map, format_type: str):
         except Exception as e:
             st.error(f"PNG export failed: {e}")
             return None, None, None
+    elif format_type == "SVG":
+        try:
+            pos = nx.spring_layout(nx_graph, seed=42)
+            plt.figure(figsize=(14, 12))
+            node_colors = [get_nanomaterials_category_color(n) for n in nx_graph.nodes()]
+            nx.draw(nx_graph, pos, with_labels=True, node_color=node_colors, edge_color='gray',
+                    node_size=400, font_size=7, font_weight='bold', edgecolors='white', linewidths=1)
+            import io
+            buf = io.BytesIO()
+            plt.savefig(buf, format='svg', bbox_inches='tight', facecolor='white')
+            buf.seek(0); plt.close()
+            return buf.read(), "image/svg+xml", "nano_graph.svg"
+        except Exception as e:
+            st.error(f"SVG export failed: {e}")
+            return None, None, None
     return None, None, None
 
-# ==========================================
+# ==============================================================================
 # GRAPH METRICS DASHBOARD
-# ==========================================
+# ==============================================================================
 def compute_graph_metrics(G: nx.Graph) -> dict:
     if G.number_of_nodes() == 0:
         return {}
+    degrees = [d for _, d in G.degree()]
     metrics = {
         "nodes": G.number_of_nodes(),
         "edges": G.number_of_edges(),
         "density": nx.density(G),
-        "avg_degree": np.mean([d for _, d in G.degree()]),
+        "avg_degree": np.mean(degrees) if degrees else 0,
         "clustering": nx.average_clustering(G) if G.number_of_nodes() > 2 else 0,
         "connected_components": nx.number_connected_components(G),
         "avg_clustering": nx.average_clustering(G) if G.number_of_nodes() > 2 else 0
@@ -1411,542 +2309,9 @@ def display_metric_dashboard(metrics: dict, theme=None):
         bridge_df = pd.DataFrame(metrics["top_bridges"], columns=["Concept", "Bridge Score"])
         st.dataframe(bridge_df, use_container_width=True)
 
-# ==========================================
+# ==============================================================================
 # THEME CONFIGURATION
-# ==========================================
-
-# ==========================================
-# INTERACTIVE GRAPH EDITING FUNCTIONS
-# ==========================================
-def apply_graph_edits(nx_graph, valid_concepts, concept_to_id, id_to_concept, 
-                       concept_abstract_map, all_concepts, edit_operations):
-    """
-    Apply graph editing operations and return updated structures.
-
-    edit_operations: list of dicts with keys 'op', 'nodes', 'new_name', 'weight'
-    """
-    modified = False
-    for op in edit_operations:
-        if op['op'] == 'remove':
-            nodes_to_remove = [n for n in op['nodes'] if n in nx_graph]
-            for n in nodes_to_remove:
-                nx_graph.remove_node(n)
-                if n in valid_concepts:
-                    valid_concepts.remove(n)
-                if n in concept_to_id:
-                    del concept_to_id[n]
-                if n in concept_abstract_map:
-                    del concept_abstract_map[n]
-            # Rebuild id_to_concept
-            id_to_concept = {i: c for i, c in enumerate(valid_concepts)}
-            modified = True
-
-        elif op['op'] == 'merge':
-            nodes_to_merge = [n for n in op['nodes'] if n in nx_graph]
-            new_name = op.get('new_name', ' + '.join(nodes_to_merge))
-            if not nodes_to_merge or new_name in nx_graph:
-                continue
-            # Collect all edges and abstract mappings
-            all_edges = {}
-            all_abstracts = []
-            for n in nodes_to_merge:
-                for neighbor in nx_graph.neighbors(n):
-                    if neighbor not in nodes_to_merge:
-                        w = nx_graph[n][neighbor].get('weight', 1)
-                        et = nx_graph[n][neighbor].get('edge_type', 'unknown')
-                        if neighbor in all_edges:
-                            all_edges[neighbor]['weight'] += w
-                            all_edges[neighbor]['cooccurrence'] += nx_graph[n][neighbor].get('cooccurrence', 0)
-                        else:
-                            all_edges[neighbor] = {'weight': w, 'cooccurrence': nx_graph[n][neighbor].get('cooccurrence', 0),
-                                                     'semantic': nx_graph[n][neighbor].get('semantic', 0), 'edge_type': et}
-                all_abstracts.extend(concept_abstract_map.get(n, []))
-            # Remove old nodes
-            for n in nodes_to_merge:
-                nx_graph.remove_node(n)
-                if n in valid_concepts:
-                    valid_concepts.remove(n)
-                if n in concept_to_id:
-                    del concept_to_id[n]
-                if n in concept_abstract_map:
-                    del concept_abstract_map[n]
-            # Add new merged node
-            nx_graph.add_node(new_name, frequency=len(set(all_abstracts)))
-            valid_concepts.append(new_name)
-            concept_abstract_map[new_name] = list(set(all_abstracts))
-            # Add edges
-            for neighbor, edge_data in all_edges.items():
-                if neighbor in nx_graph:
-                    nx_graph.add_edge(new_name, neighbor, **edge_data)
-            # Rebuild mappings
-            concept_to_id = {c: i for i, c in enumerate(valid_concepts)}
-            id_to_concept = {i: c for i, c in enumerate(valid_concepts)}
-            modified = True
-
-        elif op['op'] == 'add_edge':
-            u, v = op['nodes']
-            weight = op.get('weight', 1.0)
-            if u in nx_graph and v in nx_graph and not nx_graph.has_edge(u, v):
-                nx_graph.add_edge(u, v, weight=weight, cooccurrence=0, semantic=0, edge_type='manual')
-                modified = True
-
-        elif op['op'] == 'rename':
-            old_name, new_name = op['nodes'][0], op.get('new_name', '')
-            if old_name in nx_graph and new_name and new_name not in nx_graph:
-                nx_graph = nx.relabel_nodes(nx_graph, {old_name: new_name})
-                idx = valid_concepts.index(old_name)
-                valid_concepts[idx] = new_name
-                concept_abstract_map[new_name] = concept_abstract_map.pop(old_name, [])
-                concept_to_id = {c: i for i, c in enumerate(valid_concepts)}
-                id_to_concept = {i: c for i, c in enumerate(valid_concepts)}
-                modified = True
-
-    return nx_graph, valid_concepts, concept_to_id, id_to_concept, concept_abstract_map, modified
-
-
-def filter_graph_by_metrics(nx_graph, concept_abstract_map, min_degree=0, min_freq=0, 
-                             max_degree=None, max_freq=None):
-    """Filter graph nodes by degree and frequency thresholds."""
-    nodes_to_keep = []
-    for node in nx_graph.nodes():
-        deg = nx_graph.degree(node)
-        freq = len(concept_abstract_map.get(node, []))
-        if deg >= min_degree and freq >= min_freq:
-            if max_degree is None or deg <= max_degree:
-                if max_freq is None or freq <= max_freq:
-                    nodes_to_keep.append(node)
-    if len(nodes_to_keep) < 2:
-        return nx_graph
-    return nx_graph.subgraph(nodes_to_keep).copy()
-
-
-# ==========================================
-# ENHANCED SUNBURST FUNCTIONS
-# ==========================================
-def build_category_hierarchy_filtered(valid_concepts, concept_abstract_map, 
-                                       selected_categories=None, top_n_per_category=40):
-    """Build hierarchy with optional category filtering."""
-    hierarchy = defaultdict(lambda: {"children": [], "count": 0})
-    category_map = abstract_concepts_to_categories(valid_concepts)
-    for concept in valid_concepts:
-        category = category_map.get(concept, 'general')
-        if selected_categories and category not in selected_categories:
-            continue
-        freq = len(concept_abstract_map.get(concept, []))
-        hierarchy[category]["children"].append((concept, freq))
-        hierarchy[category]["count"] += freq
-    for parent in list(hierarchy.keys()):
-        children = hierarchy[parent]["children"]
-        if top_n_per_category > 0 and len(children) > top_n_per_category:
-            children.sort(key=lambda x: x[1], reverse=True)
-            children = children[:top_n_per_category]
-            hierarchy[parent]["count"] = sum(cnt for _, cnt in children)
-            hierarchy[parent]["children"] = children
-    labels, parents, values = [], [], []
-    for parent, data in hierarchy.items():
-        labels.append(parent); parents.append(""); values.append(data["count"])
-        for child, cnt in data["children"]:
-            labels.append(child); parents.append(parent); values.append(cnt)
-    return labels, parents, values
-
-
-def render_sunburst_chart_enhanced(labels, parents, values, cmap_name="viridis", 
-                                    label_size=11, width=800, height=600, 
-                                    branchvalues="total", theme=None):
-    """Enhanced sunburst with branch values toggle."""
-    if not labels or len(labels) < 2:
-        st.info("Not enough categories for sunburst chart.")
-        return
-    n_items = len(labels)
-    use_remainder = branchvalues == "remainder" or n_items > 80
-    unique_ids = []; seen = {}
-    for i, lab in enumerate(labels):
-        base = lab[:25] + ("…" if len(lab) > 25 else "")
-        if base in seen:
-            unique_ids.append(f"{base}_{seen[base]}")
-            seen[base] += 1
-        else:
-            unique_ids.append(base); seen[base] = 1
-    parent_ids = []
-    for p in parents:
-        if p == "":
-            parent_ids.append("")
-        else:
-            for i, lab in enumerate(labels):
-                if lab == p:
-                    parent_ids.append(unique_ids[i])
-                    break
-            else:
-                parent_ids.append("")
-    colors = get_colormap_colors(cmap_name, len(unique_ids))
-    bv = "remainder" if use_remainder else branchvalues
-    fig = go.Figure(go.Sunburst(
-        labels=unique_ids, parents=parent_ids, values=values, ids=unique_ids,
-        branchvalues=bv,
-        marker=dict(colors=colors, line=dict(width=0.5, color="white")),
-        textinfo="label+percent entry+value",
-        insidetextorientation="radial",
-        textfont=dict(size=label_size),
-        hovertemplate='<b>%{label}</b><br>Value: %{value}<br>Parent: %{parent}<extra></extra>'
-    ))
-    fig.update_layout(
-        title="<b>Defect-Engineered Ag Nanoparticles & Applications Domain Hierarchy</b><br><i>Size = concept frequency</i>",
-        font=dict(size=label_size, family="Arial"),
-        paper_bgcolor="white", plot_bgcolor="white",
-        width=width, height=height,
-        margin=dict(t=60, b=20, l=20, r=20)
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-
-# ==========================================
-# INNOVATIVE VISUALIZATION FUNCTIONS
-# ==========================================
-def render_concept_timeline(df, valid_concepts, concept_abstract_map, top_n=15, theme=None):
-    """Render concept frequency timeline if Year data exists."""
-    if theme is None:
-        theme = THEME_PRESETS["Bright (Default)"]
-    if 'Year' not in df.columns or df['Year'].isna().all():
-        st.info("No valid Year column found in data. Timeline requires publication year information.")
-        return
-
-    df_year = df.dropna(subset=['Year']).copy()
-    df_year['Year'] = pd.to_numeric(df_year['Year'], errors='coerce')
-    df_year = df_year.dropna(subset=['Year'])
-    if len(df_year) == 0:
-        st.info("No valid year data available for timeline.")
-        return
-
-    # Get top concepts by frequency
-    top_concepts = sorted(valid_concepts, 
-                          key=lambda c: len(concept_abstract_map.get(c, [])), 
-                          reverse=True)[:top_n]
-
-    text_cols = [c for c in df_year.columns if any(k in c.lower() for k in ['abstract', 'title', 'summary', 'text'])]
-    if not text_cols:
-        st.info("No text columns found for timeline analysis.")
-        return
-
-    timeline_data = []
-    for _, row in df_year.iterrows():
-        year = int(row['Year'])
-        text = " ".join([str(row.get(col, '')) for col in text_cols if pd.notna(row.get(col))])
-        text_lower = text.lower()
-        for concept in top_concepts:
-            count = len(re.findall(r'\b' + re.escape(concept.lower()) + r'\b', text_lower))
-            if count > 0:
-                timeline_data.append({'Year': year, 'Concept': concept, 'Count': count})
-
-    if not timeline_data:
-        st.info("No concept occurrences found with year data.")
-        return
-
-    timeline_df = pd.DataFrame(timeline_data)
-    timeline_agg = timeline_df.groupby(['Year', 'Concept'])['Count'].sum().reset_index()
-
-    fig = px.line(timeline_agg, x='Year', y='Count', color='Concept',
-                  title='Concept Frequency Over Time',
-                  labels={'Count': 'Mentions', 'Year': 'Publication Year'},
-                  template='plotly_white' if theme == THEME_PRESETS["Bright (Default)"] else 'plotly_dark')
-    fig.update_layout(
-        paper_bgcolor=theme.get('plotly_paper', '#ffffff'),
-        plot_bgcolor=theme.get('plotly_bg', '#ffffff'),
-        font_color=theme.get('font', '#000000'),
-        legend=dict(orientation="h", yanchor="bottom", y=-0.3),
-        height=500
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-
-def render_cooccurrence_heatmap(nx_graph, valid_concepts, concept_abstract_map, 
-                                 top_n=30, cmap_name="viridis", theme=None):
-    """Render co-occurrence heatmap for top concepts."""
-    if theme is None:
-        theme = THEME_PRESETS["Bright (Default)"]
-
-    top_concepts = sorted(valid_concepts, 
-                          key=lambda c: len(concept_abstract_map.get(c, [])), 
-                          reverse=True)[:top_n]
-
-    if len(top_concepts) < 3:
-        st.info("Not enough concepts for heatmap.")
-        return
-
-    # Build co-occurrence matrix
-    cooc_matrix = np.zeros((len(top_concepts), len(top_concepts)))
-    concept_idx = {c: i for i, c in enumerate(top_concepts)}
-
-    for u, v, data in nx_graph.edges(data=True):
-        if u in concept_idx and v in concept_idx:
-            i, j = concept_idx[u], concept_idx[v]
-            w = data.get('cooccurrence', data.get('weight', 1))
-            cooc_matrix[i][j] = w
-            cooc_matrix[j][i] = w
-
-    # Create heatmap
-    fig = go.Figure(data=go.Heatmap(
-        z=cooc_matrix,
-        x=[c[:20] + "…" if len(c) > 20 else c for c in top_concepts],
-        y=[c[:20] + "…" if len(c) > 20 else c for c in top_concepts],
-        colorscale=cmap_name if cmap_name in px.colors.named_colorscales() else 'Viridis',
-        hoverongaps=False,
-        hovertemplate='%{x} ↔ %{y}<br>Co-occurrence: %{z}<extra></extra>'
-    ))
-    fig.update_layout(
-        title="Concept Co-occurrence Heatmap",
-        xaxis=dict(tickangle=45, tickfont=dict(size=8)),
-        yaxis=dict(tickfont=dict(size=8)),
-        height=max(400, len(top_concepts) * 15),
-        paper_bgcolor=theme.get('plotly_paper', '#ffffff'),
-        plot_bgcolor=theme.get('plotly_bg', '#ffffff'),
-        font_color=theme.get('font', '#000000')
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-
-def render_tsne_projection(valid_concepts, concept_abstract_map, embed_model, 
-                           cmap_name="viridis", theme=None):
-    """Render t-SNE projection of concept embeddings."""
-    if theme is None:
-        theme = THEME_PRESETS["Bright (Default)"]
-    if len(valid_concepts) < 5:
-        st.info("Need at least 5 concepts for t-SNE projection.")
-        return
-
-    with st.spinner("Computing t-SNE projection..."):
-        embeddings = embed_model.encode(valid_concepts, show_progress_bar=False, batch_size=64)
-        perplexity = min(30, len(valid_concepts) - 1)
-        tsne = TSNE(n_components=2, perplexity=perplexity, random_state=42, 
-                    n_iter=1000, learning_rate='auto', init='pca')
-        coords = tsne.fit_transform(embeddings)
-
-    category_map = abstract_concepts_to_categories(valid_concepts)
-    categories = [category_map.get(c, 'general') for c in valid_concepts]
-    frequencies = [len(concept_abstract_map.get(c, [])) for c in valid_concepts]
-
-    df_tsne = pd.DataFrame({
-        'x': coords[:, 0], 'y': coords[:, 1],
-        'concept': valid_concepts, 'category': categories,
-        'frequency': frequencies
-    })
-
-    fig = px.scatter(df_tsne, x='x', y='y', color='category', size='frequency',
-                     hover_data=['concept', 'frequency'],
-                     title='t-SNE Projection of Concept Embeddings',
-                     color_discrete_sequence=get_colormap_colors(cmap_name, len(set(categories))),
-                     template='plotly_white' if theme == THEME_PRESETS["Bright (Default)"] else 'plotly_dark')
-    fig.update_layout(
-        paper_bgcolor=theme.get('plotly_paper', '#ffffff'),
-        plot_bgcolor=theme.get('plotly_bg', '#ffffff'),
-        font_color=theme.get('font', '#000000'),
-        height=600
-    )
-    fig.update_traces(marker=dict(opacity=0.8, line=dict(width=1, color='DarkSlateGrey')))
-    st.plotly_chart(fig, use_container_width=True)
-
-
-def render_community_detection(nx_graph, valid_concepts, concept_abstract_map, 
-                                cmap_name="viridis", theme=None):
-    """Detect and visualize communities with interactive coloring."""
-    if theme is None:
-        theme = THEME_PRESETS["Bright (Default)"]
-    if nx_graph.number_of_nodes() < 5:
-        st.info("Need at least 5 nodes for community detection.")
-        return
-
-    try:
-        from networkx.algorithms import community
-        communities = list(community.greedy_modularity_communities(nx_graph))
-    except Exception as e:
-        st.warning(f"Community detection failed: {e}")
-        return
-
-    node_community = {}
-    for i, comm in enumerate(communities):
-        for node in comm:
-            node_community[node] = i
-
-    # Assign colors
-    colors = get_colormap_colors(cmap_name, len(communities))
-
-    pos = nx.spring_layout(nx_graph, seed=42, k=1.5)
-
-    edge_x, edge_y = [], []
-    for u, v in nx_graph.edges():
-        x0, y0 = pos[u]; x1, y1 = pos[v]
-        edge_x.extend([x0, x1, None]); edge_y.extend([y0, y1, None])
-
-    edge_trace = go.Scatter(x=edge_x, y=edge_y, mode='lines',
-                            line=dict(width=0.8, color=theme.get('edge_unknown', '#cccccc')),
-                            hoverinfo='skip')
-
-    # Group nodes by community for legend
-    community_traces = []
-    for i, comm in enumerate(communities):
-        comm_nodes = [n for n in comm if n in pos]
-        if not comm_nodes:
-            continue
-        x_vals = [pos[n][0] for n in comm_nodes]
-        y_vals = [pos[n][1] for n in comm_nodes]
-        freqs = [len(concept_abstract_map.get(n, [])) for n in comm_nodes]
-        texts = [f"{n}<br>Community: {i+1}<br>Freq: {len(concept_abstract_map.get(n, []))}" for n in comm_nodes]
-
-        community_traces.append(go.Scatter(
-            x=x_vals, y=y_vals, mode='markers+text',
-            marker=dict(size=[max(10, min(30, f*2+8)) for f in freqs], 
-                       color=colors[i], line=dict(width=2, color='white'),
-                       opacity=0.85),
-            text=[n[:15] + "…" if len(n) > 15 else n for n in comm_nodes],
-            textposition="top center",
-            textfont=dict(size=8, color=theme.get('font', '#000000')),
-            hovertext=texts, hoverinfo='text',
-            name=f"Community {i+1} ({len(comm_nodes)} nodes)"
-        ))
-
-    fig = go.Figure(data=[edge_trace] + community_traces)
-    fig.update_layout(
-        title=f"Community Detection (Modularity-based) — {len(communities)} communities",
-        showlegend=True,
-        legend=dict(orientation="h", yanchor="bottom", y=-0.2),
-        paper_bgcolor=theme.get('plotly_paper', '#ffffff'),
-        plot_bgcolor=theme.get('plotly_bg', '#ffffff'),
-        font_color=theme.get('font', '#000000'),
-        xaxis=dict(showgrid=False, showticklabels=False, zeroline=False),
-        yaxis=dict(showgrid=False, showticklabels=False, zeroline=False),
-        height=650,
-        margin=dict(l=20, r=20, t=50, b=100)
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-    # Show community summary
-    comm_summary = []
-    for i, comm in enumerate(communities):
-        comm_concepts = list(comm)[:10]
-        comm_summary.append({
-            'Community': f"C{i+1}",
-            'Size': len(comm),
-            'Top Concepts': ", ".join(comm_concepts[:5])
-        })
-    st.dataframe(pd.DataFrame(comm_summary), use_container_width=True)
-
-
-def render_concept_growth(df, valid_concepts, concept_abstract_map, all_texts, 
-                          top_n=20, theme=None):
-    """Render concept growth rate comparing early vs recent years."""
-    if theme is None:
-        theme = THEME_PRESETS["Bright (Default)"]
-    if 'Year' not in df.columns or df['Year'].isna().all():
-        st.info("Year data required for growth analysis.")
-        return
-
-    df_year = df.dropna(subset=['Year']).copy()
-    df_year['Year'] = pd.to_numeric(df_year['Year'], errors='coerce')
-    df_year = df_year.dropna(subset=['Year'])
-
-    if len(df_year) < 10:
-        st.info("Not enough year data for growth analysis.")
-        return
-
-    median_year = df_year['Year'].median()
-    early_df = df_year[df_year['Year'] <= median_year]
-    recent_df = df_year[df_year['Year'] > median_year]
-
-    text_cols = [c for c in df_year.columns if any(k in c.lower() for k in ['abstract', 'title', 'summary', 'text'])]
-    if not text_cols:
-        st.info("No text columns for growth analysis.")
-        return
-
-    # Count concept occurrences in early vs recent
-    top_concepts = sorted(valid_concepts, 
-                          key=lambda c: len(concept_abstract_map.get(c, [])), 
-                          reverse=True)[:top_n]
-
-    growth_data = []
-    for concept in top_concepts:
-        early_count = 0
-        for _, row in early_df.iterrows():
-            text = " ".join([str(row.get(col, '')) for col in text_cols if pd.notna(row.get(col))])
-            early_count += len(re.findall(r'\b' + re.escape(concept.lower()) + r'\b', text.lower()))
-
-        recent_count = 0
-        for _, row in recent_df.iterrows():
-            text = " ".join([str(row.get(col, '')) for col in text_cols if pd.notna(row.get(col))])
-            recent_count += len(re.findall(r'\b' + re.escape(concept.lower()) + r'\b', text.lower()))
-
-        growth_rate = ((recent_count - early_count) / max(early_count, 1)) * 100 if early_count > 0 else 0
-        growth_data.append({
-            'Concept': concept,
-            'Early Count': early_count,
-            'Recent Count': recent_count,
-            'Growth Rate (%)': round(growth_rate, 1)
-        })
-
-    growth_df = pd.DataFrame(growth_data).sort_values('Growth Rate (%)', ascending=True)
-
-    fig = go.Figure()
-    colors = ['#ef4444' if x < 0 else '#22c55e' for x in growth_df['Growth Rate (%)']]
-    fig.add_trace(go.Bar(
-        y=growth_df['Concept'].apply(lambda x: x[:25] + "…" if len(x) > 25 else x),
-        x=growth_df['Growth Rate (%)'],
-        orientation='h',
-        marker_color=colors,
-        text=growth_df['Growth Rate (%)'].apply(lambda x: f"{x:+.1f}%"),
-        textposition='outside'
-    ))
-    fig.update_layout(
-        title=f"Concept Growth Rate (Early ≤{int(median_year)} vs Recent >{int(median_year)})",
-        xaxis_title="Growth Rate (%)",
-        yaxis_title="",
-        height=max(400, len(growth_df) * 25),
-        paper_bgcolor=theme.get('plotly_paper', '#ffffff'),
-        plot_bgcolor=theme.get('plotly_bg', '#ffffff'),
-        font_color=theme.get('font', '#000000')
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-
-def render_bubble_chart(nx_graph, valid_concepts, concept_abstract_map, distill_df, 
-                        cmap_name="viridis", theme=None):
-    """Render bubble chart: degree vs frequency, size = distillation efficiency."""
-    if theme is None:
-        theme = THEME_PRESETS["Bright (Default)"]
-    if len(valid_concepts) < 3:
-        st.info("Not enough concepts for bubble chart.")
-        return
-
-    category_map = abstract_concepts_to_categories(valid_concepts)
-    bubble_data = []
-    for concept in valid_concepts:
-        deg = nx_graph.degree(concept) if concept in nx_graph else 0
-        freq = len(concept_abstract_map.get(concept, []))
-        eff_row = distill_df[distill_df['concept'] == concept]
-        efficiency = eff_row['distillation_efficiency'].values[0] if len(eff_row) > 0 else 0.5
-        category = category_map.get(concept, 'general')
-        bubble_data.append({
-            'Concept': concept,
-            'Degree': deg,
-            'Frequency': freq,
-            'Efficiency': efficiency,
-            'Category': category
-        })
-
-    bubble_df = pd.DataFrame(bubble_data)
-
-    fig = px.scatter(bubble_df, x='Degree', y='Frequency', size='Efficiency',
-                     color='Category', hover_data=['Concept'],
-                     title='Concept Importance Bubble Chart<br><sub>Size = Distillation Efficiency</sub>',
-                     size_max=50,
-                     color_discrete_sequence=get_colormap_colors(cmap_name, len(bubble_df['Category'].unique())))
-    fig.update_layout(
-        paper_bgcolor=theme.get('plotly_paper', '#ffffff'),
-        plot_bgcolor=theme.get('plotly_bg', '#ffffff'),
-        font_color=theme.get('font', '#000000'),
-        height=600,
-        legend=dict(orientation="h", yanchor="bottom", y=-0.25)
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-
+# ==============================================================================
 THEME_PRESETS = {
     "Bright (Default)": {
         "bg": "#ffffff", "font": "#1e293b", "tooltip_bg": "rgba(255,255,255,0.95)",
@@ -2035,13 +2400,12 @@ PHYSICS_PRESETS = {
     }
 }
 
-# ==========================================
-# SIDEBAR CONFIGURATION
-# ==========================================
+# ==============================================================================
+# SIDEBAR CONFIGURATION (Enhanced with editing tools)
+# ==============================================================================
 def render_sidebar():
     with st.sidebar:
         st.header("⚙️ Configuration")
-
         st.subheader("🎨 Theme")
         st.session_state['theme'] = st.selectbox(
             "Color theme:",
@@ -2049,15 +2413,14 @@ def render_sidebar():
             index=0
         )
         theme = THEME_PRESETS[st.session_state['theme']]
-
         st.subheader("🔬 Nanomaterials Focus Areas")
-        st.markdown("- Defect-engineered Ag nanoparticles (ISF, EST, Twins)")
-        st.markdown("- Technological applications (SERS, Catalysis, Sensing)")
-        st.markdown("- Biomedical applications (Antibacterial, Theranostics)")
-        st.markdown("- Synthesis & defect introduction (Plasma, irradiation, chemical reduction)")
-        st.markdown("- Advanced characterization (HRTEM, STEM, XRD, UV-Vis, SERS mapping)")
-        st.markdown("- Computational modeling (DFT, FDTD, DDA, MD)")
-
+        st.markdown("- Core-shell Cu@Ag / Ag@Cu nanoparticles")
+        st.markdown("- Bimetallic Ag-Cu nanostructures")
+        st.markdown("- Synthesis (seed-mediated growth, galvanic replacement, co-reduction)")
+        st.markdown("- Interfacial engineering (lattice mismatch, epitaxial growth, interdiffusion)")
+        st.markdown("- Functional properties (plasmonics, SERS, catalysis, antibacterial)")
+        st.markdown("- Characterization (HAADF-STEM, EDS mapping, UV-Vis, XRD peak shifts)")
+        st.markdown("- Computational methods (FDTD, DDA, DFT, MD)")
         st.subheader("🖼️ Visualization")
         st.session_state['viz_backend'] = st.selectbox(
             "Engine:", ["PyVis (Interactive)", "Plotly 2D", "Plotly 3D", "Text Summary"], index=0
@@ -2065,7 +2428,6 @@ def render_sidebar():
         st.session_state['cmap_name'] = st.selectbox(
             "Colormap:", options=list(SUPPORTED_COLORMAPS.keys()), index=0
         )
-
         st.subheader("🔧 Physics & Layout")
         st.session_state['physics_preset'] = st.selectbox(
             "Physics preset:",
@@ -2076,7 +2438,6 @@ def render_sidebar():
         st.session_state['physics_enabled'] = st.checkbox(
             "Enable physics", value=(preset["gravity"] != 0)
         )
-
         with st.expander("⚙️ Advanced Physics Overrides"):
             st.session_state['adv_damping'] = st.slider("Damping", 0.05, 0.95, preset["damping"], step=0.05)
             st.session_state['adv_gravity'] = st.slider("Repulsion", -8000, -500, preset["gravity"], step=100)
@@ -2084,7 +2445,6 @@ def render_sidebar():
             st.session_state['adv_spring_strength'] = st.slider("Spring strength", 0.01, 0.20, preset["spring_strength"], step=0.01)
             st.session_state['adv_central_gravity'] = st.slider("Central gravity", 0.0, 0.5, preset["central_gravity"], step=0.05)
             st.session_state['adv_stabilization'] = st.slider("Stabilization iter", 0, 5000, preset["stabilization"], step=250)
-
         base_preset = PHYSICS_PRESETS[st.session_state['physics_preset']].copy()
         if st.session_state.get('adv_damping') is not None:
             base_preset["damping"] = st.session_state['adv_damping']
@@ -2094,7 +2454,6 @@ def render_sidebar():
             base_preset["central_gravity"] = st.session_state['adv_central_gravity']
             base_preset["stabilization"] = st.session_state['adv_stabilization']
         st.session_state['effective_physics'] = base_preset
-
         st.subheader("📊 Display Limits")
         col_all1, col_slider1 = st.columns([0.3, 0.7])
         with col_all1:
@@ -2106,7 +2465,6 @@ def render_sidebar():
             )
         if all_graph:
             st.session_state['top_n_graph'] = 0
-
         col_all2, col_slider2 = st.columns([0.3, 0.7])
         with col_all2:
             all_sun = st.checkbox("All", value=True, key="all_sun_chk")
@@ -2117,7 +2475,6 @@ def render_sidebar():
             )
         if all_sun:
             st.session_state['top_n_sunburst'] = 0
-
         col_all3, col_slider3 = st.columns([0.3, 0.7])
         with col_all3:
             all_radar = st.checkbox("All", value=True, key="all_radar_chk")
@@ -2128,99 +2485,151 @@ def render_sidebar():
             )
         if all_radar:
             st.session_state['top_n_radar'] = 0
-
         st.subheader("🔧 Graph Parameters")
         st.session_state['min_freq'] = st.slider("Min concept frequency", 1, 20, 1)
         st.session_state['min_words'] = st.slider("Min words per concept", 2, 5, 2)
         st.session_state['sim_threshold'] = st.slider("Semantic threshold", 0.6, 0.95, 0.85, step=0.05)
         st.session_state['cooc_weight'] = st.slider("Co-occurrence weight", 0.5, 1.0, 0.9, step=0.1)
         st.session_state['sem_weight'] = st.slider("Semantic weight", 0.0, 0.5, 0.1, step=0.1)
-
         st.subheader("📐 Statistics")
         st.session_state['bootstrap_samples'] = st.slider("Bootstrap samples", 100, 2000, 500, step=100)
         st.session_state['alpha_level'] = st.selectbox("Significance α", [0.01, 0.05, 0.10], index=1)
-
         
+        # ===== ENHANCED: Graph Editing Section =====
+        st.subheader("✏️ Graph Editing")
+        with st.expander("Edit Graph (Nodes/Edges)"):
+            if 'analysis_data' in st.session_state and st.session_state.analysis_data is not None:
+                data = st.session_state.analysis_data
+                valid_concepts = data['valid_concepts']
+                # Remove Nodes
+                st.markdown("**Remove Nodes**")
+                remove_selected = st.multiselect("Select nodes to remove", valid_concepts, key='remove_nodes')
+                if st.button("Remove Selected Nodes", key='remove_btn'):
+                    if remove_selected:
+                        edits = {'remove_nodes': remove_selected}
+                        G_new, map_new, concepts_new = apply_graph_edits(
+                            data['nx_graph'], data['concept_abstract_map'], valid_concepts, edits
+                        )
+                        st.session_state.analysis_data['nx_graph'] = G_new
+                        st.session_state.analysis_data['concept_abstract_map'] = map_new
+                        st.session_state.analysis_data['valid_concepts'] = concepts_new
+                        st.session_state.analysis_data['concept_to_id'] = {c: i for i, c in enumerate(concepts_new)}
+                        st.session_state.analysis_data['id_to_concept'] = {i: c for i, c in enumerate(concepts_new)}
+                        st.success(f"Removed {len(remove_selected)} nodes.")
+                        st.rerun()
+                    else:
+                        st.warning("Select at least one node.")
+                st.markdown("---")
+                # Merge Nodes
+                st.markdown("**Merge Nodes**")
+                merge_list = st.multiselect("Select nodes to merge", valid_concepts, key='merge_nodes_select')
+                new_name = st.text_input("New concept name", key='merge_new_name')
+                if st.button("Merge Selected", key='merge_btn'):
+                    if len(merge_list) >= 2 and new_name.strip():
+                        edits = {'merge_nodes': [(merge_list, new_name.strip())]}
+                        G_new, map_new, concepts_new = apply_graph_edits(
+                            data['nx_graph'], data['concept_abstract_map'], valid_concepts, edits
+                        )
+                        st.session_state.analysis_data['nx_graph'] = G_new
+                        st.session_state.analysis_data['concept_abstract_map'] = map_new
+                        st.session_state.analysis_data['valid_concepts'] = concepts_new
+                        st.session_state.analysis_data['concept_to_id'] = {c: i for i, c in enumerate(concepts_new)}
+                        st.session_state.analysis_data['id_to_concept'] = {i: c for i, c in enumerate(concepts_new)}
+                        st.success(f"Merged {len(merge_list)} nodes into '{new_name.strip()}'.")
+                        st.rerun()
+                    else:
+                        st.warning("Select at least 2 nodes and provide a new name.")
+                st.markdown("---")
+                # Add Edge
+                st.markdown("**Add Edge**")
+                nodes = valid_concepts
+                u = st.selectbox("From", nodes, key='edge_u')
+                v = st.selectbox("To", nodes, key='edge_v')
+                weight = st.number_input("Weight", value=1.0, min_value=0.1, key='edge_weight')
+                if st.button("Add Edge", key='add_edge_btn'):
+                    if u != v:
+                        edits = {'add_edges': [(u, v, weight)]}
+                        G_new, map_new, concepts_new = apply_graph_edits(
+                            data['nx_graph'], data['concept_abstract_map'], valid_concepts, edits
+                        )
+                        st.session_state.analysis_data['nx_graph'] = G_new
+                        st.session_state.analysis_data['concept_abstract_map'] = map_new
+                        st.session_state.analysis_data['valid_concepts'] = concepts_new
+                        st.success(f"Edge added: {u} -- {v} (weight={weight})")
+                        st.rerun()
+                    else:
+                        st.warning("Source and target must be different.")
+                st.markdown("---")
+                # Filter by degree/frequency
+                st.markdown("**Filter Graph**")
+                min_deg = st.slider("Min degree", 0, 20, 0, key='filter_deg')
+                min_freq_f = st.slider("Min frequency", 0, 50, 0, key='filter_freq')
+                if st.button("Apply Filters", key='filter_btn'):
+                    edits = {}
+                    if min_deg > 0:
+                        edits['filter_by_degree'] = min_deg
+                    if min_freq_f > 0:
+                        edits['filter_by_freq'] = min_freq_f
+                    if edits:
+                        G_new, map_new, concepts_new = apply_graph_edits(
+                            data['nx_graph'], data['concept_abstract_map'], valid_concepts, edits
+                        )
+                        st.session_state.analysis_data['nx_graph'] = G_new
+                        st.session_state.analysis_data['concept_abstract_map'] = map_new
+                        st.session_state.analysis_data['valid_concepts'] = concepts_new
+                        st.session_state.analysis_data['concept_to_id'] = {c: i for i, c in enumerate(concepts_new)}
+                        st.session_state.analysis_data['id_to_concept'] = {i: c for i, c in enumerate(concepts_new)}
+                        st.success("Filters applied.")
+                        st.rerun()
+            else:
+                st.info("Build the graph first to enable editing.")
+        
+        # ===== ENHANCED: Sunburst filter =====
+        st.subheader("☀️ Sunburst Options")
+        st.session_state['sunburst_categories'] = st.multiselect(
+            "Filter categories",
+            options=list(CATEGORY_DISPLAY_NAMES.keys()),
+            default=[],
+            key='sunburst_cat_filter',
+            format_func=lambda x: CATEGORY_DISPLAY_NAMES.get(x, x)
+        )
+        st.session_state['sunburst_branchvalues'] = st.selectbox(
+            "Branch values mode", ['total', 'remainder'], index=0, key='sunburst_branch'
+        )
         st.markdown("---")
-
-        # Graph Editing Section (only when analysis data exists)
-        if st.session_state.get("analysis_data") is not None:
-            data = st.session_state.analysis_data
-            edits = render_graph_editing_sidebar(
-                data["nx_graph"], data["valid_concepts"], 
-                data["concept_to_id"], data["id_to_concept"],
-                data["concept_abstract_map"], data.get("all_concepts", [])
-            )
-            if edits:
-                if "pending_edits" not in st.session_state:
-                    st.session_state.pending_edits = []
-                st.session_state.pending_edits.extend(edits)
-                st.success(f"Queued {len(edits)} edit(s). Click 'Apply Edits' below.")
-
-            if st.button("✅ Apply All Edits", key="apply_all_edits", type="primary"):
-                if st.session_state.get("pending_edits"):
-                    with st.spinner("Applying edits..."):
-                        nx_graph, valid_concepts, concept_to_id, id_to_concept, concept_abstract_map, modified =                             apply_graph_edits(
-                                data["nx_graph"], data["valid_concepts"],
-                                data["concept_to_id"], data["id_to_concept"],
-                                data["concept_abstract_map"], data.get("all_concepts", []),
-                                st.session_state.pending_edits
-                            )
-                        if modified:
-                            st.session_state.analysis_data["nx_graph"] = nx_graph
-                            st.session_state.analysis_data["valid_concepts"] = valid_concepts
-                            st.session_state.analysis_data["concept_to_id"] = concept_to_id
-                            st.session_state.analysis_data["id_to_concept"] = id_to_concept
-                            st.session_state.analysis_data["concept_abstract_map"] = concept_abstract_map
-                            st.session_state.pending_edits = []
-                            st.success("Edits applied! Refreshing...")
-                            st.rerun()
-                        else:
-                            st.info("No changes were made.")
-
-            if st.button("🔄 Clear Edit Queue", key="clear_edits"):
-                st.session_state.pending_edits = []
-                st.success("Edit queue cleared")
-
-            st.markdown("---")
-
-            # Sunburst Options
-            sunburst_cats, sunburst_branch = render_sunburst_sidebar(data["valid_concepts"])
-            st.session_state['sunburst_categories'] = sunburst_cats
-            st.session_state['sunburst_branchvalues'] = sunburst_branch
-            st.markdown("---")
-
-st.markdown("---")
+        
         if st.button("🗑️ Clear Cache"):
             st.cache_resource.clear()
             st.cache_data.clear()
             gc.collect()
             st.success("Cache cleared!")
+            
         gpu_info = "CUDA" if torch.cuda.is_available() else "CPU"
         st.caption(f"🖥️ Device: {gpu_info}")
 
+# ==============================================================================
+# MAIN FUNCTION (Fully Enhanced)
+# ==============================================================================
 def main():
-    st.title("🔬 Nanomaterials-ConceptGraph: Defect-Engineered Ag Nanoparticles Explorer")
-    st.caption("Large-corpus concept graph builder for defect-engineered silver nanoparticles (ISF, EST, twins) and their technological applications (SERS, catalysis, sensing) • Optimized for defect characterization and functional performance")
+    st.title("🔬 NanoGraph-Explorer: Core-Shell Ag-Cu Nanostructure Analytics")
+    st.caption("Publication-ready concept graph analytics for Ag-Cu and Cu@Ag core-shell nanostructures • Plasmonics, Catalysis, Interfacial Engineering")
     render_sidebar()
     if "analysis_data" not in st.session_state:
         st.session_state.analysis_data = None
     if "input_hash" not in st.session_state:
         st.session_state.input_hash = None
-    if "pending_edits" not in st.session_state:
-        st.session_state.pending_edits = []
-    if "graph_filter" not in st.session_state:
-        st.session_state.graph_filter = None
-
+    if "edit_history" not in st.session_state:
+        st.session_state.edit_history = GraphEditHistory()
+    
     # ─── LOAD JSON DATA ───
     st.header("📂 Data Loading")
-    st.info(f"Place JSON files in: `{JSON_METADATA_DIR}`")
+    st.info(f"Place JSON/JSONL/CSV/TSV/BIB files in: `{JSON_METADATA_DIR}`")
     with st.spinner("Scanning json_metadatabase..."):
         file_records = load_all_json_files(JSON_METADATA_DIR)
         df = build_master_dataframe(file_records)
     if not file_records:
-        st.warning("No .json files found in the directory.")
-        st.info("Please place your JSON metadata files in the `json_metadatabase/` folder.")
+        st.warning("No supported files found in the directory.")
+        st.info("Please place your metadata files in the `json_metadatabase/` folder.")
         return
     successful_files = [f for f in file_records if f[1]]
     if not successful_files:
@@ -2238,7 +2647,7 @@ def main():
         st.dataframe(df_filtered.head(5), use_container_width=True)
         st.markdown("**Available columns:**")
         st.write(list(df_filtered.columns))
-
+    
     # ─── TEXT COLUMN SELECTION ───
     text_cols = [c for c in df_filtered.columns if any(k in c.lower() for k in ['abstract', 'title', 'summary', 'text', 'content', 'description'])]
     if not text_cols:
@@ -2251,7 +2660,7 @@ def main():
     if not selected_text_cols:
         st.error("Please select at least one text column.")
         return
-
+    
     # ─── RUN ANALYSIS ───
     if st.button("🚀 Build Concept Graph", type="primary", use_container_width=True):
         progress_bar = st.progress(0.0)
@@ -2344,6 +2753,13 @@ def main():
                 progress_bar.progress(0.90)
                 st.write("🔬 Computing distillation metrics...")
                 distill_df = compute_concept_distillation(valid_concepts, concept_abstract_map, all_texts)
+                # Compute advanced analytics
+                st.write("🔬 Computing advanced analytics...")
+                burst_df = detect_keyword_bursts(df_filtered, concept_abstract_map, valid_concepts)
+                bridge_df = detect_cross_domain_bridges(nx_graph, valid_concepts)
+                motif_data = analyze_network_motifs(nx_graph, valid_concepts)
+                drift_df = detect_semantic_drift(valid_concepts, concept_abstract_map, all_texts, embed_model, df_filtered=df_filtered)
+                genealogy_df = build_concept_genealogy(nx_graph, valid_concepts, concept_abstract_map)
                 st.success("✅ Analysis complete!")
                 progress_bar.progress(1.00)
                 status.update(label="✅ Analysis complete!", state="complete", expanded=False)
@@ -2362,10 +2778,21 @@ def main():
                     "embed_model": embed_model,
                     "all_metrics": all_metrics,
                     "all_texts": all_texts,
-                    "all_concepts": all_concepts,
                     "config": config,
-                    "df_filtered": df_filtered
+                    "df_filtered": df_filtered,
+                    "burst_df": burst_df,
+                    "bridge_df": bridge_df,
+                    "motif_data": motif_data,
+                    "drift_df": drift_df,
+                    "genealogy_df": genealogy_df
                 }
+                # Initialize edit history
+                st.session_state.edit_history = GraphEditHistory()
+                st.session_state.edit_history.push_state({
+                    'nx_graph': nx_graph.copy(),
+                    'concept_abstract_map': dict(concept_abstract_map),
+                    'valid_concepts': list(valid_concepts)
+                })
         except Exception as e:
             st.error(f"❌ Pipeline Error: {e}")
             with st.expander("🔍 Traceback"):
@@ -2375,7 +2802,7 @@ def main():
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
-
+    
     # ─── DISPLAY RESULTS ───
     if st.session_state.analysis_data is not None:
         data = st.session_state.analysis_data
@@ -2384,42 +2811,28 @@ def main():
         nx_graph = data["nx_graph"]
         top_scores = data["top_scores"]
         distill_df = data["distill_df"]
-        df_filtered = data.get("df_filtered", df_filtered)
         cmap = st.session_state.get('cmap_name', 'viridis')
         top_n_graph = st.session_state.get('top_n_graph', 200)
-        viz_tab, distill_tab, scores_tab, valid_tab, export_tab, extra_viz_tab = st.tabs([
-            "🎨 Visualization", "📊 Distillation", "🎯 Research Directions", "📐 Validation", "📥 Export", "✨ Extra Viz"
+        theme = THEME_PRESETS.get(st.session_state.get('theme', 'Bright (Default)'), THEME_PRESETS["Bright (Default)"])
+        
+        # ===== ENHANCED: Seven tabs =====
+        viz_tab, distill_tab, scores_tab, valid_tab, extra_tab, advanced_tab, export_tab = st.tabs([
+            "🎨 Visualization", "📊 Distillation", "🎯 Research Directions",
+            "📐 Validation", "🌟 Extra Viz", "🔬 Advanced Analytics", "📥 Export"
         ])
         with viz_tab:
             st.subheader("🌐 Interactive Concept Graph")
             if nx_graph.number_of_nodes() == 0:
                 st.warning("No nodes to display.")
-            elif nx_graph.number_of_edges() == 0:
+                return
+            elif nx_graph.number_of_edges() == 0 and len(valid_concepts) > 1:
                 st.warning("No edges — building semantic fallback")
                 nx_graph = nx.complete_graph(len(valid_concepts))
                 nx_graph = nx.relabel_nodes(nx_graph, {i: valid_concepts[i] for i in range(len(valid_concepts))})
-
             viz_choice = st.session_state.get('viz_backend', 'PyVis (Interactive)')
             physics = st.session_state.get('physics_enabled', True)
             physics_preset = st.session_state.get('effective_physics', PHYSICS_PRESETS["Stable (Default)"])
-            theme = THEME_PRESETS.get(st.session_state.get('theme', 'Bright (Default)'), THEME_PRESETS["Bright (Default)"])
-
             top_n = st.session_state.get('top_n_graph', 0)
-
-            # Apply graph filter if set
-            if st.session_state.get('graph_filter'):
-                filt = st.session_state['graph_filter']
-                nx_graph = filter_graph_by_metrics(
-                    nx_graph, concept_abstract_map,
-                    min_degree=filt.get('min_degree', 0),
-                    min_freq=filt.get('min_freq', 0),
-                    max_degree=filt.get('max_degree'),
-                    max_freq=filt.get('max_freq')
-                )
-                if st.button("🔄 Clear Filter", key="clear_filter"):
-                    del st.session_state['graph_filter']
-                    st.rerun()
-
             if viz_choice == "PyVis (Interactive)":
                 render_graph_pyvis(nx_graph, concept_abstract_map, physics_enabled=physics,
                                    cmap_name=cmap, top_n_nodes=top_n,
@@ -2429,35 +2842,37 @@ def main():
                                        theme=theme)
             elif viz_choice == "Plotly 3D":
                 render_graph_plotly_3d(nx_graph, concept_abstract_map, cmap_name=cmap, top_n_nodes=top_n,
-                                        theme=theme)
+                                       theme=theme)
             else:
                 render_graph_fallback(nx_graph, concept_abstract_map, theme=theme)
-
             with st.expander("📊 Graph Metrics"):
                 metrics = compute_graph_metrics(nx_graph)
                 display_metric_dashboard(metrics, theme=theme)
-
             with st.expander("📈 Domain Hierarchy (Sunburst)"):
-                sunburst_cats = st.session_state.get('sunburst_categories', None)
-                sunburst_branch = st.session_state.get('sunburst_branchvalues', 'total')
-                labels, parents, values = build_category_hierarchy_filtered(
+                cat_filter = st.session_state.get('sunburst_categories', [])
+                if cat_filter:
+                    st.info(f"Filtering categories: {', '.join(cat_filter)}")
+                branchval = st.session_state.get('sunburst_branchvalues', 'total')
+                labels, parents, values = build_category_hierarchy(
                     valid_concepts, concept_abstract_map,
-                    selected_categories=sunburst_cats if sunburst_cats else None,
-                    top_n_per_category=st.session_state.get('top_n_sunburst', 0)
+                    top_n_per_category=st.session_state.get('top_n_sunburst', 0),
+                    categories_filter=cat_filter if cat_filter else None
                 )
-                render_sunburst_chart_enhanced(labels, parents, values, cmap_name=cmap, 
-                                                branchvalues=sunburst_branch, theme=theme)
-
+                render_sunburst_chart(labels, parents, values, cmap_name=cmap, theme=theme,
+                                      branchvalues=branchval)
             with st.expander("📡 Concept Radar"):
                 radar_k = st.session_state.get('top_n_radar', 15)
                 if radar_k == 0:
-                    radar_k = min(15, len(distill_df))
-                render_radar_chart(distill_df, top_k=radar_k, cmap_name=cmap, theme=theme)
-
+                    radar_k = min(15, len(distill_df)) if not distill_df.empty else 0
+                if radar_k > 0 and not distill_df.empty:
+                    render_radar_chart(distill_df, top_k=radar_k, cmap_name=cmap, theme=theme)
+                else:
+                    st.info("Not enough data for radar chart.")
         with distill_tab:
             st.subheader("🔍 Concept Distillation Efficiency")
-            top_n = st.slider("Show Top N", 10, min(200, len(distill_df)), 50, key="distill_top_n")
-            display_df = distill_df.head(top_n)
+            top_n = st.slider("Show Top N", 10, min(200, len(distill_df)) if not distill_df.empty else 10,
+                              min(50, len(distill_df)) if not distill_df.empty else 10, key="distill_top_n")
+            display_df = distill_df.head(top_n) if not distill_df.empty else pd.DataFrame()
             st.dataframe(display_df, use_container_width=True)
             st.markdown("**📈 Efficiency vs Frequency:**")
             chart_df = display_df.set_index('concept')[['distillation_efficiency']]
@@ -2470,17 +2885,17 @@ def main():
                 st.line_chart(compare_df)
         with scores_tab:
             st.subheader("🎯 Top Research Direction Recommendations")
-            if top_scores.empty:
+            if top_scores is None or top_scores.empty:
                 st.info("No novel pairs scored. The graph may be too dense or too sparse.")
             else:
                 st.write(f"Top {len(top_scores)} novel concept pairs:")
                 st.dataframe(top_scores[['concept_u', 'concept_v', 'composite_score',
                                          'gnn_affinity', 'semantic_novelty',
                                          'expected_property_gain', 'feasibility_score']].head(20),
-                            use_container_width=True)
+                             use_container_width=True)
                 csv_scores = top_scores.to_csv(index=False).encode('utf-8')
                 st.download_button("📥 Download Scores (CSV)", data=csv_scores,
-                                  file_name="research_directions.csv", mime="text/csv")
+                                   file_name="research_directions.csv", mime="text/csv")
         with valid_tab:
             st.subheader("📐 Mathematical Validation")
             val_metrics = validate_graph_metrics(nx_graph, valid_concepts)
@@ -2489,13 +2904,15 @@ def main():
             col2.metric("Silhouette", f"{val_metrics.get('silhouette_score', 0):.3f}")
             col3.metric("Communities", val_metrics.get('n_communities', 0))
             col4.metric("Significant Edges", val_metrics.get('edge_significant_count', 0))
-            if not top_scores.empty:
+            if top_scores is not None and not top_scores.empty and 'composite_score' in top_scores.columns:
                 n_boot = st.session_state.get('bootstrap_samples', 500)
                 alpha = st.session_state.get('alpha_level', 0.05)
                 mean_score, ci_low, ci_high = compute_bootstrap_ci(
                     top_scores['composite_score'].values, n_bootstrap=n_boot, alpha=alpha
                 )
                 st.success(f"🎯 Composite Score: `{mean_score:.3f}` | {int((1-alpha)*100)}% CI: `[{ci_low:.3f}, {ci_high:.3f}]`")
+            else:
+                st.info("No composite scores available for bootstrap CI.")
             X_feat, y_target = [], []
             for u, v in nx_graph.edges():
                 pu, pv = data["concept_properties"].get(u, 0), data["concept_properties"].get(v, 0)
@@ -2509,75 +2926,161 @@ def main():
                 c1.metric("R²", f"{r2_score(y_target, y_pred):.3f}")
                 c2.metric("MAE", f"{mean_absolute_error(y_target, y_pred):.2f}")
                 c3.metric("RMSE", f"{np.sqrt(mean_squared_error(y_target, y_pred)):.2f}")
+        
+        # ===== ENHANCED: Extra Visualization Tab =====
+        with extra_tab:
+            st.subheader("🌟 Innovative Visualizations for Core-Shell Ag-Cu Concepts")
+            df_filtered = data.get('df_filtered', pd.DataFrame())
+            if df_filtered.empty:
+                st.info("No filtered dataframe available for temporal visualizations.")
+            if not df_filtered.empty and 'Year' in df_filtered.columns:
+                with st.expander("📅 Concept Timeline (Yearly Trends)", expanded=True):
+                    render_timeline(df_filtered, concept_abstract_map, valid_concepts)
+                with st.expander("🔥 Co-occurrence Heatmap"):
+                    top_n_heat = st.slider("Top N concepts for heatmap", 10, 50, 30, key='heat_top')
+                    render_cooccurrence_heatmap(nx_graph, valid_concepts, concept_abstract_map, top_n=top_n_heat)
+                with st.expander("📊 t-SNE Projection"):
+                    render_tsne_projection(valid_concepts, data['embed_model'], concept_abstract_map, cmap)
+                with st.expander("🔮 Community Detection (Modularity)"):
+                    render_community_detection(nx_graph, valid_concepts)
+            if not df_filtered.empty and 'Year' in df_filtered.columns:
+                with st.expander("📈 Concept Growth Rate"):
+                    render_concept_growth(df_filtered, concept_abstract_map, valid_concepts)
+            with st.expander("🫧 Concept Landscape (Degree vs Frequency)"):
+                render_bubble_chart(valid_concepts, concept_abstract_map, nx_graph)
+            with st.expander("📊 Degree Distribution"):
+                render_degree_distribution(nx_graph)
+            with st.expander("🏆 Centrality Comparison"):
+                render_centrality_comparison(nx_graph, valid_concepts, concept_abstract_map)
+        
+        # ===== NEW: Advanced Analytics Tab =====
+        with advanced_tab:
+            st.subheader("🔬 Advanced Analytics & Discovery")
+            with st.expander("💥 Keyword Burst Detection"):
+                burst_df = data.get('burst_df', pd.DataFrame())
+                if burst_df is not None and not burst_df.empty:
+                    st.dataframe(burst_df.head(20), use_container_width=True)
+                    fig = px.bar(burst_df.head(20), x='concept', y='burst_score',
+                                 color='max_consecutive',
+                                 title='Top Bursty Concepts',
+                                 labels={'burst_score': 'Burst Score'})
+                    fig.update_layout(xaxis=dict(tickangle=45))
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("Burst detection requires Year data.")
+            with st.expander("🌉 Cross-Domain Bridge Detection"):
+                bridge_df = data.get('bridge_df', pd.DataFrame())
+                if bridge_df is not None and not bridge_df.empty:
+                    st.dataframe(bridge_df.head(20), use_container_width=True)
+                    fig = px.scatter(bridge_df, x='betweenness', y='category_diversity',
+                                     size='neighbor_count', color='own_category',
+                                     hover_name='concept',
+                                     title='Bridge Concepts: Betweenness vs Category Diversity')
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("No bridge data available.")
+            with st.expander("🧬 Network Motif Analysis"):
+                motif_data = data.get('motif_data', {})
+                if motif_data and isinstance(motif_data, dict):
+                    cols = st.columns(4)
+                    cols[0].metric("Triangles", motif_data.get('triangles', 0))
+                    cols[1].metric("Star Nodes", motif_data.get('stars', 0))
+                    cols[2].metric("4-Cliques", motif_data.get('cliques_4', 0))
+                    cols[3].metric("Transitivity", f"{motif_data.get('transitivity', 0):.4f}")
+                    # Motif bar chart
+                    motif_vals = {k: v for k, v in motif_data.items() if k in ['triangles', 'stars', 'cliques_4']}
+                    if motif_vals:
+                        fig = px.bar(x=list(motif_vals.keys()), y=list(motif_vals.values()),
+                                     title='Network Motif Counts',
+                                     labels={'x': 'Motif Type', 'y': 'Count'})
+                        st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("No motif data available.")
+            with st.expander("🔄 Semantic Drift Detection"):
+                drift_df = data.get('drift_df', pd.DataFrame())
+                if drift_df is not None and not drift_df.empty:
+                    st.dataframe(drift_df.head(20), use_container_width=True)
+                    fig = px.bar(drift_df.head(20), x='concept', y='semantic_drift',
+                                 color='late_count',
+                                 title='Concepts with Highest Semantic Drift',
+                                 labels={'semantic_drift': 'Drift Score'})
+                    fig.update_layout(xaxis=dict(tickangle=45))
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("Semantic drift requires Year data and sufficient temporal coverage.")
+            with st.expander("👨‍👩‍👧 Concept Genealogy"):
+                genealogy_df = data.get('genealogy_df', pd.DataFrame())
+                if genealogy_df is not None and not genealogy_df.empty:
+                    st.dataframe(genealogy_df[['concept', 'generation', 'n_parents', 'n_children', 'n_siblings', 'frequency']].head(20),
+                                 use_container_width=True)
+                    fig = px.scatter(genealogy_df, x='generation', y='frequency',
+                                     size='n_children', color='n_parents',
+                                     hover_name='concept',
+                                     title='Concept Genealogy: Generation vs Frequency')
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("No genealogy data available.")
+            with st.expander("📄 Generate Analysis Report"):
+                if st.button("Generate Full Report"):
+                    report = generate_analysis_report(
+                        data, compute_graph_metrics(nx_graph),
+                        validate_graph_metrics(nx_graph, valid_concepts),
+                        top_scores, distill_df,
+                        data.get('burst_df', pd.DataFrame()),
+                        data.get('bridge_df', pd.DataFrame()),
+                        data.get('motif_data', {}),
+                        data.get('drift_df', pd.DataFrame()),
+                        data.get('genealogy_df', pd.DataFrame())
+                    )
+                    st.markdown(report)
+                    st.download_button("📥 Download Report (MD)", data=report.encode('utf-8'),
+                                       file_name="nanograph_analysis_report.md", mime="text/markdown")
+        
         with export_tab:
             st.subheader("📥 Export & Post-Processing")
-            export_format = st.selectbox("Format:", ["GraphML", "JSON", "CSV (Edges)", "CSV (Nodes)", "PNG"])
-            if st.button("📤 Generate Export"):
-                result = export_graph(nx_graph, concept_abstract_map, export_format)
-                if result[0]:
-                    data_bytes, mime, filename = result
-                    st.download_button("💾 Save File", data=data_bytes, file_name=filename, mime=mime)
+            col1, col2 = st.columns(2)
+            with col1:
+                export_format = st.selectbox("Network Format:",
+                                             ["GraphML", "GEXF", "JSON", "CSV (Edges)", "CSV (Nodes)"])
+                if st.button("📤 Export Network"):
+                    result = export_graph(nx_graph, concept_abstract_map, export_format)
+                    if result[0]:
+                        data_bytes, mime, filename = result
+                        st.download_button("💾 Save Network", data=data_bytes, file_name=filename, mime=mime)
+            with col2:
+                fig_format = st.selectbox("Figure Format:", ["PNG", "SVG"])
+                fig_type = st.selectbox("Figure Type:", ["network", "degree_distribution", "community"])
+                dpi = st.slider("DPI", 150, 600, 300, step=50)
+                if st.button("📤 Export Figure"):
+                    fig_bytes = export_publication_figure(
+                        nx_graph, concept_abstract_map, valid_concepts,
+                        figure_type=fig_type, dpi=dpi, cmap_name=cmap
+                    )
+                    mime = "image/png" if fig_format == "PNG" else "image/svg+xml"
+                    ext = "png" if fig_format == "PNG" else "svg"
+                    st.download_button(f"💾 Save {fig_format}", data=fig_bytes,
+                                       file_name=f"nano_graph_{fig_type}.{ext}", mime=mime)
+            if not valid_concepts:
+                st.warning("No concepts to export.")
+                return
             concept_list_df = pd.DataFrame({
                 'concept': valid_concepts,
                 'frequency': [len(concept_abstract_map.get(c, [])) for c in valid_concepts],
-                'degree': [nx_graph.degree(c) for c in valid_concepts],
+                'degree': [nx_graph.degree(c) if c in nx_graph else 0 for c in valid_concepts],
                 'category': [abstract_concepts_to_categories([c]).get(c, 'general') for c in valid_concepts]
             })
             csv_concepts = concept_list_df.to_csv(index=False).encode('utf-8')
             st.download_button("📄 Download Concept List (CSV)", data=csv_concepts,
-                              file_name="concepts.csv", mime="text/csv")
-
-        # ─── EXTRA VISUALIZATIONS TAB ───
-        with extra_viz_tab:
-            st.subheader("✨ Innovative Visualizations")
-
-            # Check if we have year data
-            has_year_data = 'Year' in df_filtered.columns and not df_filtered['Year'].isna().all()
-
-            ev_tab1, ev_tab2, ev_tab3, ev_tab4, ev_tab5, ev_tab6 = st.tabs([
-                "📈 Timeline", "🔥 Heatmap", "🎯 t-SNE", "🌐 Communities", "📊 Growth", "🫧 Bubble"
-            ])
-
-            with ev_tab1:
-                if has_year_data:
-                    timeline_top_n = st.slider("Top N concepts for timeline", 5, 30, 15, key="timeline_top_n")
-                    render_concept_timeline(df_filtered, valid_concepts, concept_abstract_map, 
-                                            top_n=timeline_top_n, theme=theme)
-                else:
-                    st.info("📅 Concept Timeline requires a 'Year' column in your data.\n\n"
-                            "Add publication year to your JSON records to enable this visualization.")
-
-            with ev_tab2:
-                heatmap_top_n = st.slider("Top N concepts for heatmap", 5, 50, 30, key="heatmap_top_n")
-                render_cooccurrence_heatmap(nx_graph, valid_concepts, concept_abstract_map,
-                                           top_n=heatmap_top_n, cmap_name=cmap, theme=theme)
-
-            with ev_tab3:
-                if st.button("🚀 Compute t-SNE Projection", key="btn_tsne"):
-                    render_tsne_projection(valid_concepts, concept_abstract_map, 
-                                          data.get("embed_model", load_embedding_model()),
-                                          cmap_name=cmap, theme=theme)
-                else:
-                    st.info("Click the button to compute t-SNE projection (may take a moment).")
-
-            with ev_tab4:
-                if st.button("🚀 Detect Communities", key="btn_communities"):
-                    render_community_detection(nx_graph, valid_concepts, concept_abstract_map,
-                                              cmap_name=cmap, theme=theme)
-                else:
-                    st.info("Click the button to run community detection.")
-
-            with ev_tab5:
-                if has_year_data:
-                    growth_top_n = st.slider("Top N concepts for growth", 5, 30, 20, key="growth_top_n")
-                    render_concept_growth(df_filtered, valid_concepts, concept_abstract_map,
-                                         data.get("all_texts", []), top_n=growth_top_n, theme=theme)
-                else:
-                    st.info("📊 Concept Growth requires a 'Year' column in your data.")
-
-            with ev_tab6:
-                render_bubble_chart(nx_graph, valid_concepts, concept_abstract_map, 
-                                   distill_df, cmap_name=cmap, theme=theme)
+                               file_name="concepts.csv", mime="text/csv")
+            # Export all advanced analytics
+            if not data.get('burst_df', pd.DataFrame()).empty:
+                csv_burst = data['burst_df'].to_csv(index=False).encode('utf-8')
+                st.download_button("📄 Download Burst Data (CSV)", data=csv_burst,
+                                   file_name="burst_analysis.csv", mime="text/csv")
+            if not data.get('bridge_df', pd.DataFrame()).empty:
+                csv_bridge = data['bridge_df'].to_csv(index=False).encode('utf-8')
+                st.download_button("📄 Download Bridge Data (CSV)", data=csv_bridge,
+                                   file_name="bridge_analysis.csv", mime="text/csv")
 
 if __name__ == "__main__":
     main()
