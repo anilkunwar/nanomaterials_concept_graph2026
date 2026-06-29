@@ -2277,9 +2277,9 @@ def main():
             st.success("✅ Graph edits applied successfully!")
         st.session_state['apply_edits'] = False
         try:
-                    st.rerun()
-                except AttributeError:
-                    st.experimental_rerun()
+            st.rerun()
+        except AttributeError:
+            st.experimental_rerun()
 
     # ─── DISPLAY RESULTS ───
     if st.session_state.analysis_data is not None:
