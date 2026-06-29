@@ -37,9 +37,13 @@
 
 # Focus on Defect Engineered Ag Nanoparticles
 
-[![integratedllmgraphnanomaterials](https://img.shields.io/badge/agnpnanocg-v5.1-red)](https://defect-engineered-ag-nanoparticles-concept-graph1.streamlit.app/) (Builds concept graph on defect engineered Ag nanoparticles, Keyterms still more generic on al the categories)
+[![integratedllmgraphnanomaterials](https://img.shields.io/badge/agnpnanocg-v5.1-red)](https://defect-engineered-ag-nanoparticles-concept-graph1.streamlit.app/) (Builds concept graph on defect engineered Ag nanoparticles, Keyterms still more generic on al the categories - leans more to core-shell nanostructures)
 
-[![integratedllmgraphnanomaterials](https://img.shields.io/badge/agnpnanocg-v5.2-red)](https://defect-engineered-ag-nanoparticles-concept-graph2.streamlit.app/) (Builds concept graph on defect engineered Ag nanoparticles, Keyterms made specific to category A)
+[![integratedllmgraphnanomaterials](https://img.shields.io/badge/agnpnanocg-v5.2-red)](https://defect-engineered-ag-nanoparticles-concept-graph2.streamlit.app/) (Builds concept graph on defect engineered Ag nanoparticles, Keyterms made specific to category A - leans more to core-shell nanostructures)
+
+[![integratedllmgraphnanomaterials](https://img.shields.io/badge/agnpnanocg-v5.3-red)](https://defect-engineered-ag-nanoparticles-concept-graph3.streamlit.app/) (Builds concept graph on defect engineered Ag nanoparticles, Keyterms made specific to category A - leans more to defect engineering)
+
+
 
 
 # Focus on Nanotwinned Copper
