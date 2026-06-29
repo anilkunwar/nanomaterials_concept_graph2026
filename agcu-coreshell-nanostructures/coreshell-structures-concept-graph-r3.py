@@ -2047,15 +2047,16 @@ def render_tsne_projection(valid_concepts, embed_model, concept_abstract_map, cm
             st.info("t-SNE produced no valid data.")
             return
         unique_cats = df_tsne['category'].unique()
-    fig = px.scatter(df_tsne, x='x', y='y', color='category', size='frequency',
-                     hover_name='concept',
-                     title='t-SNE Projection of Concept Embeddings',
-                     labels={'x':'t-SNE 1', 'y':'t-SNE 2'},
-                     size_max=20,
-                     color_discrete_sequence=get_colormap_colors(cmap_name, max(1, len(unique_cats))))
+        fig = px.scatter(df_tsne, x='x', y='y', color='category', size='frequency',
+                         hover_name='concept',
+                         title='t-SNE Projection of Concept Embeddings',
+                         labels={'x':'t-SNE 1', 'y':'t-SNE 2'},
+                         size_max=20,
+                         color_discrete_sequence=get_colormap_colors(cmap_name, max(1, len(unique_cats))))
         st.plotly_chart(fig, use_container_width=True)
     except Exception as e:
         st.error(f"t-SNE failed: {e}")
+
 
 
 def render_community_detection(nx_graph, valid_concepts):
