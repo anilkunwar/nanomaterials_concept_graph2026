@@ -1198,6 +1198,9 @@ def detect_semantic_drift(valid_concepts, concept_abstract_map, all_texts, embed
     if df_years.empty or len(df_years) < 10:
         return pd.DataFrame()
 
+    abs_year = {i: y for i, y in df_years[year_col].items() if i < len(df_filtered)}
+    median_year = df_years[year_col].median()
+
     # Ensure we have enough concepts with year data
     year_concepts = 0
     for concept in valid_concepts:
@@ -1206,9 +1209,6 @@ def detect_semantic_drift(valid_concepts, concept_abstract_map, all_texts, embed
             year_concepts += 1
     if year_concepts < 3:
         return pd.DataFrame()
-
-    median_year = df_years[year_col].median()
-    abs_year = {i: y for i, y in df_years[year_col].items() if i < len(df_filtered)}
 
     drift_data = []
     for concept in valid_concepts:
