@@ -2,12 +2,13 @@
 # -*- coding: utf-8 -*-
 """
 ================================================================================
-NanoGraph-Explorer: Advanced Concept Graph Analytics for Core-Shell Ag-Cu Nanostructures
+NanoGraph-Explorer: Advanced Concept Graph Analytics for Defect-Engineered Nanomaterials
 ================================================================================
 A publication-ready, large-corpus concept graph extraction and visualization platform
-for nanomaterials literature mining. Optimized for core-shell Ag-Cu nanostructures
-with plasmonic, catalytic, and interfacial engineering focus.
-Version: 2.0 (Enhanced Publication Edition)
+for nanomaterials literature mining. Optimized for defect-engineered silver nanoparticles
+with stacking faults, deformation twins, stress-mediated diffusion, and ultra-low-temperature
+pressureless sintering for power electronics packaging.
+Version: 3.0 (Defect Engineering Edition)
 Features:
 - Robust multi-format data ingestion (JSON/JSONL/CSV/XML/BIB) with BOM handling
 - Domain-specific concept extraction with semantic clustering and TF-IDF weighting
@@ -83,7 +84,7 @@ warnings.filterwarnings('ignore')
 # PAGE CONFIGURATION
 # ==============================================================================
 st.set_page_config(
-    page_title="NanoGraph-Explorer: Core-Shell Ag-Cu Nanostructure Analytics",
+    page_title="NanoGraph-Explorer: Defect-Engineered Nanomaterial Analytics",
     page_icon="🔬",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -265,169 +266,123 @@ def build_master_dataframe(file_records):
     return df
 
 # ==============================================================================
-# CORE-SHELL AG-CU DOMAIN CONFIGURATION
+# DEFECT-ENGINEERED AG NANOPARTICLES DOMAIN CONFIGURATION
 # ==============================================================================
 CORE_MATERIALS = [
-    "cu@ag", "ag@cu", "cu ag core shell", "ag cu core shell",
-    "core shell copper silver", "core shell silver copper",
-    "cu@ag core shell", "ag@cu core shell",
-    "copper silver core shell", "silver copper core shell",
-    "cu ag nanoparticle", "ag cu nanoparticle", "copper silver nanoparticle",
-    "cu ag bimetallic", "ag cu bimetallic", "copper silver bimetallic",
-    "cu/ag core shell", "ag/cu core shell",
-    "cu ag nanostructure", "ag cu nanostructure",
-    "cu ag nanowire", "ag cu nanowire", "cu ag nanorod",
-    "cu ag nanocrystal", "ag cu nanocrystal",
-    "cu ag nanocomposite", "ag cu nanocomposite",
-    "silver coated copper", "copper coated silver",
-    "cu@ag core-shell", "ag@cu core-shell"
+    "silver nanoparticles", "ag nanoparticles", "nano-silver", "ag nps", 
+    "fcc ag", "face-centered cubic silver", "fcc metals", "ag nanocrystals",
+    "sic", "gan", "power electronics", "lead-free solders", "sn-based alloys"
 ]
 
 MATERIAL_PROPERTIES = [
-    "lattice mismatch", "misfit strain", "interfacial strain", "coherency strain",
-    "critical shell thickness", "epitaxial growth", "heteroepitaxy",
-    "interfacial diffusion", "interdiffusion", "kirkendall effect", "void formation",
-    "shell thickness", "core diameter", "core size", "shell volume",
-    "surface plasmon resonance", "spr", "localized surface plasmon resonance", "lspr",
-    "plasmon peak", "extinction coefficient", "absorption cross section",
-    "catalytic activity", "electrocatalysis", "surface enhanced raman scattering", "sers",
-    "enhancement factor", "hot spots", "electromagnetic enhancement",
-    "electrical conductivity", "sheet resistance", "contact resistance", "resistivity",
-    "thermal conductivity", "thermal stability", "oxidation resistance", "corrosion resistance",
-    "antibacterial activity", "antimicrobial", "cytotoxicity", "biocompatibility",
-    "work function", "band gap", "fermi level", "schottky barrier",
-    "surface energy", "wettability", "hydrophobicity", "sers substrate",
-    "refractive index", "dielectric function", "extinction spectrum"
+    # Defect Engineering & Microstructure
+    "defect engineering", "crystal defects", "stacking faults", "deformation twins", 
+    "intrinsic stacking fault", "isf", "extrinsic stacking fault", "esf", 
+    "coherent twin boundaries", "ctb", "nanotwinning", "planar defects", 
+    "partial dislocations", "shockley partial dislocations", "dislocation slip", 
+    "slip planes", "fcc {111} close-packed planes", "lattice distortion", 
+    "lattice microstrain", "lattice strain", "planar defect density", "twin boundary", 
+    "fault vectors", "atomic stacking disorder", "hcp atomic arrangements", 
+    "vacancy formation", "vacancy-mediated diffusion",
+    # Stress & Diffusion Mechanisms
+    "stress-mediated diffusion", "stress-assisted diffusion", "atomic diffusion", 
+    "mass transport", "surface diffusion", "grain boundary diffusion", "plastic deformation", 
+    "plastic flow", "vacancy formation energy", "migration energy", "migration barrier", 
+    "diffusion activation energy", "activation energy", "hydrostatic stress", 
+    "von mises stress", "local microstress", "microstress gradients", "eigenstrain", 
+    "configurational force", "chemical potential", "mean square displacement", "msd", 
+    "potential energy", "thermal stability", "surface micro-melting", "sintering neck", 
+    "laplace pressure", "pipe-diffusion channels", "ultra-low-temperature sintering", 
+    "pressureless sintering", "sintering temperature reduction", "low-thermal-budget packaging",
+    # General Properties
+    "electrical conductivity", "thermal conductivity", "shear strength", "reliability"
 ]
 
 SYNTHESIS_METHODS = [
-    "seed mediated growth", "seed-mediated growth", "seed mediated",
-    "galvanic replacement", "galvanic displacement", "transmetalation",
-    "co-reduction", "coreduction", "simultaneous reduction",
-    "successive reduction", "stepwise reduction", "sequential reduction",
-    "chemical reduction", "thermal reduction", "polyol method", "polyol process",
-    "solvothermal", "hydrothermal", "microemulsion", "reverse microemulsion",
-    "electroless deposition", "electroless plating", "electrochemical deposition",
-    "magnetron sputtering", "sputtering", "physical vapor deposition", "pvd",
-    "chemical vapor deposition", "cvd", "atomic layer deposition", "ald",
-    "molecular beam epitaxy", "mbe",
-    "photochemical reduction", "photoreduction", "radiolytic reduction",
-    "sonochemical", "microwave assisted", "laser ablation",
-    "green synthesis", "biological synthesis", "plant extract",
-    "capping agent", "surfactant", "pvp", "ctab", "oleylamine", "oleic acid",
-    "ligand exchange", "surface functionalization", "self-assembly"
+    "controlled plastic deformation", "high-speed centrifugation", "die-casting", 
+    "uniaxial compression", "polyol method", "solid-state reaction", 
+    "thermogravimetric-differential scanning calorimetry", "tg-dsc", "dsc", "tg",
+    "chemical reduction", "thermal reduction", "capping agent", "surfactant", 
+    "pvp", "tannic acid", "ethylene glycol"
 ]
 
 STRUCTURE_CHARACTERIZATION = [
-    "transmission electron microscopy", "tem", "high resolution tem", "hrtem",
-    "scanning transmission electron microscopy", "stem", "haadf-stem", "adf-stem",
-    "energy dispersive x-ray spectroscopy", "eds", "edx", "stem-eds", "tem-eds",
-    "elemental mapping", "line scan", "line profile", "eds mapping", "edx mapping",
-    "electron energy loss spectroscopy", "eels", "stem-eels",
-    "x-ray diffraction", "xrd", "xrd peak shift", "peak broadening", "scherrer equation",
-    "selected area electron diffraction", "saed", "x-ray photoelectron spectroscopy", "xps",
-    "uv-vis spectroscopy", "uv-vis-nir", "extinction spectrum", "absorption spectrum",
-    "dynamic light scattering", "dls", "zeta potential", "hydrodynamic diameter",
-    "small angle x-ray scattering", "saxs", "x-ray absorption spectroscopy", "xas",
-    "extended x-ray absorption fine structure", "exafs", "xanes",
-    "scanning electron microscopy", "sem", "fe-sem",
-    "atomic force microscopy", "afm",
-    "energy dispersive spectroscopy", "eds",
-    "inductively coupled plasma", "icp", "icp-oes", "icp-ms",
-    "core shell morphology", "yolk shell", "nanocavity", "porous shell",
-    "lattice fringe", "interplanar spacing", "d-spacing", "crystal structure",
-    "fcc", "face centered cubic", "epitaxial relationship", "orientation relationship"
+    "aberration-corrected tem", "ac-tem", "high-resolution x-ray diffraction", "xrd", 
+    "geometric phase analysis", "gpa", "fast fourier transform", "fft", 
+    "williamson-hall method", "w-h method", "full width at half maximum", "fwhm", 
+    "nanoscale characterization", "atomistic scale characterization", "tem", "stem",
+    "energy dispersive x-ray spectroscopy", "eds", "x-ray photoelectron spectroscopy", "xps"
 ]
 
 COMPUTATIONAL_METHODS = [
-    "density functional theory", "dft", "ab initio", "first principles",
-    "molecular dynamics", "md", "classical md", "ab initio md", "aimd",
-    "finite difference time domain", "fdtd", "discrete dipole approximation", "dda",
-    "boundary element method", "bem", "finite element method", "fem",
-    "mie theory", "mie scattering", "gans theory", "discrete dipole",
-    "monte carlo", "kinetic monte carlo", "kmc", "metropolis algorithm",
-    "machine learning potential", "ml potential", "neural network potential", "nnp",
-    "molecular statics", "nudged elastic band", "neb",
-    "comsol multiphysics", "lumerical", "meep",
-    "phase field method", "pfm", "diffusion simulation", "finite element"
+    "phase-field modelling", "pfm", "phase-field fft model", "phase-field approach", 
+    "fourier spectral method", "allen-cahn equation", "molecular dynamics", "md", 
+    "lammps", "embedded atom method", "eam potential", "density-functional theory", 
+    "dft", "vasp", "projector augmented wave", "paw", "generalized gradient approximation", 
+    "gga", "generalized stacking fault energy", "gsfe", "gated attention", 
+    "gated attention ai", "gated angular distance weighting", "g-adw", 
+    "transformer-inspired attention", "cross-attention interpolation", 
+    "machine learning interpolators", "multiscale material modeling", 
+    "multiscale computational insight", "physics-aware interpolation", "spatial regularization"
 ]
 
 FUNCTIONAL_PROPERTIES = [
-    "surface enhanced raman scattering", "sers", "sers substrate", "sers activity",
-    "hot spot", "electromagnetic enhancement", "chemical enhancement",
-    "localized surface plasmon resonance", "lspr", "plasmonic", "plasmon resonance",
-    "refractive index sensitivity", "figure of merit", "fom",
-    "catalytic activity", "electrocatalysis", "photocatalysis", "plasmonic catalysis",
-    "surface catalysis", "co catalysis", "synergistic effect",
-    "antibacterial", "antimicrobial", "bactericidal", "antibiofilm",
-    "biocompatibility", "cytotoxicity", "cell viability", "drug delivery",
-    "electrical conductivity", "conductivity", "sheet resistance", "interconnect",
-    "conductive ink", "flexible electronics", "stretchable electronics", "wearable",
-    "transparent conductor", "printed electronics", "solder", "die attach",
-    "thermal conductivity", "thermal interface material", "tim",
-    "photothermal therapy", "ptt", "photodynamic therapy", "pdt", "theranostics",
-    "biosensor", "chemical sensor", "gas sensor", "colorimetric sensor",
-    "optical filter", "absorber", "reflective", "structural color"
+    "ultra-low-temperature pressureless sintering", "low-temperature sintering", 
+    "power electronics packaging", "sic/gan power electronics", "die-attach materials", 
+    "electronic packaging", "stress-mediated diffusion", "stress-assisted diffusion", 
+    "atomic diffusion", "mass transport", "pipe-diffusion", "thermal interface material",
+    "energy saving", "sustainable nanomaterial production", "high-temperature reliability"
 ]
 
 ALL_DOMAIN_KEYWORDS = (CORE_MATERIALS + MATERIAL_PROPERTIES + SYNTHESIS_METHODS +
                        STRUCTURE_CHARACTERIZATION + COMPUTATIONAL_METHODS + FUNCTIONAL_PROPERTIES)
 
 NANOMATERIALS_PATTERNS = [
-    r'\b(?:cu@ag|ag@cu|cu/ag|ag/cu)\b',
-    r'\b(?:core\s*shell\s*(?:cu|ag|copper|silver|cu\s*ag|ag\s*cu|copper\s*silver|silver\s*copper))\b',
-    r'\b(?:cu\s*ag|ag\s*cu|copper\s*silver|silver\s*copper)\s*(?:bimetallic|nanoparticle|nanostructure|nanocrystal|nanowire|nanorod|core\s*shell)\b',
-    r'\b(?:bimetallic\s*(?:nanoparticle|nanowire|nanorod|nanostructure|core\s*shell))\b',
-    r'\b(?:seed\s*mediated|galvanic\s*replacement|galvanic\s*displacement|co\s*reduction)\b',
-    r'\b(?:lattice\s*mismatch|misfit\s*strain|interfacial\s*strain|epitaxial\s*growth)\b',
-    r'\b(?:shell\s*thickness|core\s*diameter|core\s*size|critical\s*thickness)\b',
-    r'\b(?:surface\s*plasmon|localized\s*surface\s*plasmon|lspr|sers|hot\s*spot)\b',
-    r'\b(?:haadf\s*stem|stem\s*eds|tem\s*eds|elemental\s*mapping|line\s*profile)\b',
-    r'\b(?:interdiffusion|kirkendall\s*effect|void\s*formation|interfacial\s*diffusion)\b',
-    r'\b(?:pvp|ctab|oleylamine|oleic\s*acid|capping\s*agent|surfactant)\b',
-    r'\b(?:fdtd|dda|mie\s*theory|comsol|lumerical)\b',
-    r'\b(?:\d+(?:\.\d+)?\s*(?:nm|µm|micrometer|angstrom|å))\b',
-    r'\b(?:uv\s*vis|extinction\s*spectrum|absorption\s*spectrum|plasmon\s*peak)\b'
+    # Defects and Microstructure
+    r'(?:stacking\s*fault|deformation\s*twin|intrinsic\s*stacking\s*fault|extrinsic\s*stacking\s*fault|coherent\s*twin|planar\s*defect|partial\s*dislocation|shockley\s*partial)',
+    r'(?:fcc\s*\{111\}|close[-\s]*packed\s*planes|slip\s*planes|twin\s*boundary|nanotwinning)',
+    # Stress and Strain
+    r'(?:lattice\s*strain|microstrain|hydrostatic\s*stress|von\s*mises\s*stress|eigenstrain|microstress|configurational\s*force)',
+    # Diffusion and Thermodynamics
+    r'(?:vacancy\s*formation\s*energy|migration\s*barrier|diffusion\s*activation\s*energy|mean\s*square\s*displacement|msd|atomic\s*diffusion|mass\s*transport|pipe[-\s]*diffusion)',
+    # Sintering and Applications
+    r'(?:pressureless\s*sintering|ultra[-\s]*low[-\s]*temperature\s*sintering|sintering\s*temperature|power\s*electronics\s*packaging|die[-\s]*attach|sic/gan)',
+    # Computational and AI
+    r'(?:phase[-\s]*field|pfm|allen[-\s]*cahn|gated\s*attention|g[-\s]*adw|transformer[-\s]*attention|multiscale\s*modeling|lammps|vasp|eam\s*potential|gsfe)',
+    # Synthesis and Characterization
+    r'(?:plastic\s*deformation|centrifugation|die[-\s]*casting|polyol\s*method|ac[-\s]*tem|geometric\s*phase\s*analysis|gpa|williamson[-\s]*hall)',
+    # Materials
+    r'(?:silver\s*nanoparticles|ag\s*nanoparticles|nano[-\s]*silver|ag\s*nps|fcc\s*ag|face[-\s]*centered\s*cubic\s*silver)'
 ]
 
 NANOMATERIALS_CATEGORY_MAPPING = {
-    r'cu@ag|ag@cu|cu/ag|ag/cu|copper\s*@\s*silver|silver\s*@\s*copper': 'core_shell_structure',
-    r'core\s*shell\s*(?:cu|ag|copper|silver|bimetallic)': 'core_shell_structure',
-    r'bimetallic\s*(?:cu|ag|copper|silver|nanoparticle|nanostructure)': 'bimetallic_system',
-    r'seed\s*mediated|galvanic\s*replacement|galvanic\s*displacement|co\s*reduction': 'synthesis_method',
-    r'polyol|chemical\s*reduction|thermal\s*reduction|microemulsion|electroless': 'synthesis_method',
-    r'lattice\s*mismatch|misfit\s*strain|interfacial\s*strain|epitaxial|coherency': 'interfacial_structure',
-    r'shell\s*thickness|core\s*diameter|core\s*size|critical\s*thickness|shell\s*volume': 'morphology_dimension',
-    r'interdiffusion|kirkendall|void\s*formation|interfacial\s*diffusion|diffusion': 'interfacial_diffusion',
-    r'surface\s*plasmon|lspr|sers|hot\s*spot|extinction\s*spectrum|plasmon\s*peak': 'plasmonic_optical',
-    r'catalytic|electrocatalysis|photocatalysis|plasmonic\s*catalysis|synergistic': 'catalytic_activity',
-    r'antibacterial|antimicrobial|bactericidal|cytotoxicity|biocompatibility': 'biomedical_property',
-    r'electrical\s*conductivity|sheet\s*resistance|conductive\s*ink|interconnect': 'electronic_property',
-    r'thermal\s*conductivity|thermal\s*stability|thermal\s*interface': 'thermal_property',
-    r'fdtd|dda|mie\s*theory|comsol|lumerical|dft|molecular\s*dynamics': 'computational_method',
-    r'haadf\s*stem|stem\s*eds|tem\s*eds|elemental\s*mapping|line\s*profile': 'advanced_characterization',
-    r'uv\s*vis|xrd|xps|dls|zeta\s*potential|saxs|exafs': 'standard_characterization',
-    r'pvp|ctab|oleylamine|oleic\s*acid|capping\s*agent|surfactant|ligand': 'surface_chemistry',
-    r'biosensor|chemical\s*sensor|gas\s*sensor|colorimetric|photothermal': 'application_device'
+    # Defect Microstructure
+    r'stacking\s*fault|deformation\s*twin|intrinsic\s*stacking\s*fault|extrinsic\s*stacking\s*fault|coherent\s*twin|planar\s*defect|partial\s*dislocation|shockley\s*partial|nanotwinning|twin\s*boundary': 'defect_microstructure',
+    # Stress & Strain Field
+    r'lattice\s*strain|microstrain|hydrostatic\s*stress|von\s*mises\s*stress|eigenstrain|microstress|configurational\s*force|lattice\s*distortion': 'stress_strain_field',
+    # Diffusion Mechanism
+    r'vacancy\s*formation|migration\s*barrier|diffusion\s*activation|mean\s*square\s*displacement|msd|atomic\s*diffusion|mass\s*transport|pipe[-\s]*diffusion|surface\s*diffusion': 'diffusion_mechanism',
+    # Computational & AI Method
+    r'phase[-\s]*field|pfm|allen[-\s]*cahn|gated\s*attention|g[-\s]*adw|transformer[-\s]*attention|multiscale\s*modeling|lammps|vasp|eam\s*potential|gsfe|dft|molecular\s*dynamics': 'computational_ai_method',
+    # Sintering & Application
+    r'pressureless\s*sintering|ultra[-\s]*low[-\s]*temperature|sintering\s*temperature|power\s*electronics|die[-\s]*attach|electronic\s*packaging|thermal\s*interface': 'sintering_application',
+    # Synthesis & Processing
+    r'plastic\s*deformation|centrifugation|die[-\s]*casting|polyol\s*method|solid[-\s]*state\s*reaction|uniaxial\s*compression': 'synthesis_processing',
+    # Advanced Characterization
+    r'aberration[-\s]*corrected\s*tem|ac[-\s]*tem|geometric\s*phase\s*analysis|gpa|williamson[-\s]*hall|w[-\s]*h\s*method|fwhm|fast\s*fourier\s*transform|fft': 'advanced_characterization',
+    # Core Materials
+    r'silver\s*nanoparticles|ag\s*nanoparticles|nano[-\s]*silver|ag\s*nps|fcc\s*ag|face[-\s]*centered\s*cubic': 'core_material_system'
 }
 
 CATEGORY_DISPLAY_NAMES = {
-    'core_shell_structure': 'Core-Shell Structure',
-    'bimetallic_system': 'Bimetallic System',
-    'synthesis_method': 'Synthesis Method',
-    'interfacial_structure': 'Interfacial Structure',
-    'morphology_dimension': 'Morphology & Dimension',
-    'interfacial_diffusion': 'Interfacial Diffusion',
-    'plasmonic_optical': 'Plasmonic & Optical',
-    'catalytic_activity': 'Catalytic Activity',
-    'biomedical_property': 'Biomedical Property',
-    'electronic_property': 'Electronic Property',
-    'thermal_property': 'Thermal Property',
-    'computational_method': 'Computational Method',
+    'defect_microstructure': 'Defect & Microstructure',
+    'stress_strain_field': 'Stress & Strain Field',
+    'diffusion_mechanism': 'Diffusion Mechanism',
+    'computational_ai_method': 'Computational & AI Method',
+    'sintering_application': 'Sintering & Application',
+    'synthesis_processing': 'Synthesis & Processing',
     'advanced_characterization': 'Advanced Characterization',
-    'standard_characterization': 'Standard Characterization',
-    'surface_chemistry': 'Surface Chemistry',
-    'application_device': 'Application & Device',
+    'core_material_system': 'Core Material System',
     'general': 'General'
 }
 
@@ -485,7 +440,9 @@ def is_valid_nanomaterials_concept(concept: str) -> bool:
     generic = {'study', 'analysis', 'effect', 'role', 'investigation', 'research',
                'method', 'approach', 'paper', 'work', 'using', 'based', 'novel',
                'new', 'recent', 'various', 'different', 'significant', 'important',
-               'report', 'demonstrate', 'show', 'result', 'data', 'find'}
+               'report', 'demonstrate', 'show', 'result', 'data', 'find',
+               'however', 'therefore', 'thus', 'moreover', 'furthermore',
+               'additionally', 'consequently', 'meanwhile', 'subsequently'}
     has_generic = any(term in concept_lower.split() for term in generic)
     words = concept.split()
     if len(words) < 2 or len(words) > 10:
@@ -494,37 +451,58 @@ def is_valid_nanomaterials_concept(concept: str) -> bool:
 
 def normalize_nanomaterials_term(concept: str) -> str:
     concept = concept.lower().strip()
-    # Normalize core materials
-    concept = re.sub(r'\bcu@ag\b', 'cu@ag core shell', concept)
-    concept = re.sub(r'\bag@cu\b', 'ag@cu core shell', concept)
-    concept = re.sub(r'\bcu/ag\b', 'cu@ag core shell', concept)
-    concept = re.sub(r'\bag/cu\b', 'ag@cu core shell', concept)
-    concept = re.sub(r'\bcore\s*shell\s*copper\s*silver\b', 'cu@ag core shell', concept)
-    concept = re.sub(r'\bcore\s*shell\s*silver\s*copper\b', 'ag@cu core shell', concept)
-    concept = re.sub(r'\bcopper\s*silver\s*nanoparticle\b', 'cu ag nanoparticle', concept)
-    concept = re.sub(r'\bsilver\s*copper\s*nanoparticle\b', 'ag cu nanoparticle', concept)
-    concept = re.sub(r'\bcopper\s*silver\s*bimetallic\b', 'cu ag bimetallic', concept)
-    # Normalize synthesis
-    concept = re.sub(r'\bseed\s*mediated\sgrowth\b', 'seed mediated growth', concept)
-    concept = re.sub(r'\bgalvanic\s*replacement\b', 'galvanic replacement', concept)
-    concept = re.sub(r'\bgalvanic\s*displacement\b', 'galvanic replacement', concept)
-    concept = re.sub(r'\bco\s*reduction\b', 'co-reduction', concept)
+    # Normalize defect engineering terms
+    concept = re.sub(r'\bintrinsic\s*stacking\s*fault\b', 'intrinsic stacking fault', concept)
+    concept = re.sub(r'\bextrinsic\s*stacking\s*fault\b', 'extrinsic stacking fault', concept)
+    concept = re.sub(r'\bcoherent\s*twin\s*boundary\b', 'coherent twin boundary', concept)
+    concept = re.sub(r'\bcoherent\s*twin\s*boundaries\b', 'coherent twin boundary', concept)
+    concept = re.sub(r'\bshockley\s*partial\s*dislocation\b', 'shockley partial dislocation', concept)
+    concept = re.sub(r'\bshockley\s*partial\b', 'shockley partial dislocation', concept)
+    concept = re.sub(r'\bpartial\s*dislocation\b', 'partial dislocation', concept)
+    concept = re.sub(r'\bdeformation\s*twin\b', 'deformation twin', concept)
+    concept = re.sub(r'\bplanar\s*defect\b', 'planar defect', concept)
+    concept = re.sub(r'\bplanar\s*defects\b', 'planar defect', concept)
+    # Normalize stress/diffusion terms
+    concept = re.sub(r'\bstress[-\s]*mediated\s*diffusion\b', 'stress-mediated diffusion', concept)
+    concept = re.sub(r'\bstress[-\s]*assisted\s*diffusion\b', 'stress-assisted diffusion', concept)
+    concept = re.sub(r'\bvacancy[-\s]*mediated\s*diffusion\b', 'vacancy-mediated diffusion', concept)
+    concept = re.sub(r'\bmean\s*square\s*displacement\b', 'mean square displacement', concept)
+    concept = re.sub(r'\bpipe[-\s]*diffusion\b', 'pipe-diffusion', concept)
+    concept = re.sub(r'\bgrain[-\s]*boundary\s*diffusion\b', 'grain boundary diffusion', concept)
+    concept = re.sub(r'\bsurface\s*diffusion\b', 'surface diffusion', concept)
+    # Normalize sintering terms
+    concept = re.sub(r'\bultra[-\s]*low[-\s]*temperature\s*sintering\b', 'ultra-low-temperature sintering', concept)
+    concept = re.sub(r'\bpressureless\s*sintering\b', 'pressureless sintering', concept)
+    concept = re.sub(r'\blow[-\s]*temperature\s*sintering\b', 'low-temperature sintering', concept)
+    # Normalize computational methods
+    concept = re.sub(r'\bphase[-\s]*field\s*modelling\b', 'phase-field modelling', concept)
+    concept = re.sub(r'\bphase[-\s]*field\s*modeling\b', 'phase-field modelling', concept)
+    concept = re.sub(r'\bphase[-\s]*field\b', 'phase-field', concept)
+    concept = re.sub(r'\ballen[-\s]*cahn\b', 'allen-cahn', concept)
+    concept = re.sub(r'\bgated\s*attention\b', 'gated attention', concept)
+    concept = re.sub(r'\bg[-\s]*adw\b', 'g-adw', concept)
+    concept = re.sub(r'\bgeneralized\s*stacking\s*fault\s*energy\b', 'generalized stacking fault energy', concept)
+    concept = re.sub(r'\bgsfe\b', 'generalized stacking fault energy', concept)
+    concept = re.sub(r'\bembedded\s*atom\s*method\b', 'embedded atom method', concept)
+    concept = re.sub(r'\beam\s*potential\b', 'eam potential', concept)
     # Normalize characterization
-    concept = re.sub(r'\bhigh\s*resolution\s*tem\b', 'hrtem', concept)
-    concept = re.sub(r'\bscanning\s*transmission\s*electron\s*microscopy\b', 'stem', concept)
-    concept = re.sub(r'\benergy\s*dispersive\s*x-ray\b', 'eds', concept)
-    concept = re.sub(r'\belectron\s*energy\s*loss\s*spectroscopy\b', 'eels', concept)
-    concept = re.sub(r'\bx-ray\s*diffraction\b', 'xrd', concept)
-    concept = re.sub(r'\bx-ray\s*photoelectron\s*spectroscopy\b', 'xps', concept)
-    concept = re.sub(r'\buv-vis\s*spectroscopy\b', 'uv-vis', concept)
-    # Normalize computational
-    concept = re.sub(r'\bdensity\s*functional\s*theory\b', 'dft', concept)
-    concept = re.sub(r'\bab\s*initio\b', 'ab initio', concept)
-    concept = re.sub(r'\bfirst\s*principles\b', 'first principles', concept)
-    concept = re.sub(r'\bmolecular\s*dynamics\b', 'molecular dynamics', concept)
-    concept = re.sub(r'\bfinite\s*element\b', 'finite element', concept)
-    concept = re.sub(r'\bfinite\s*difference\s*time\s*domain\b', 'fdtd', concept)
-    concept = re.sub(r'\bdiscrete\s*dipole\s*approximation\b', 'dda', concept)
+    concept = re.sub(r'\baberration[-\s]*corrected\s*tem\b', 'aberration-corrected tem', concept)
+    concept = re.sub(r'\bac[-\s]*tem\b', 'aberration-corrected tem', concept)
+    concept = re.sub(r'\bgeometric\s*phase\s*analysis\b', 'geometric phase analysis', concept)
+    concept = re.sub(r'\bgpa\b', 'geometric phase analysis', concept)
+    concept = re.sub(r'\bwilliamson[-\s]*hall\b', 'williamson-hall', concept)
+    concept = re.sub(r'\bfull\s*width\s*at\s*half\s*maximum\b', 'full width at half maximum', concept)
+    concept = re.sub(r'\bfwhm\b', 'full width at half maximum', concept)
+    concept = re.sub(r'\bfast\s*fourier\s*transform\b', 'fast fourier transform', concept)
+    concept = re.sub(r'\bfft\b', 'fast fourier transform', concept)
+    # Normalize material terms
+    concept = re.sub(r'\bsilver\s*nanoparticles\b', 'silver nanoparticles', concept)
+    concept = re.sub(r'\bag\s*nanoparticles\b', 'ag nanoparticles', concept)
+    concept = re.sub(r'\bnano[-\s]*silver\b', 'nano-silver', concept)
+    concept = re.sub(r'\bag\s*nps\b', 'ag nps', concept)
+    concept = re.sub(r'\bface[-\s]*centered\s*cubic\s*silver\b', 'face-centered cubic silver', concept)
+    concept = re.sub(r'\bface[-\s]*centered\s*cubic\s*ag\b', 'face-centered cubic silver', concept)
+    concept = re.sub(r'\bfcc\s*ag\b', 'fcc ag', concept)
     # Normalize units
     concept = re.sub(r'\bnm\b', 'nm', concept)
     concept = re.sub(r'\bµm\b', 'um', concept)
@@ -540,8 +518,8 @@ def extract_concepts_from_text(text: str) -> List[str]:
             concept = m.lower().strip().rstrip('.').rstrip(',')
             if len(concept.split()) >= 1 and len(concept) > 3:
                 concepts.add(concept)
-    # Noun phrase extraction for nanomaterials domain
-    noun_pattern = r'\b(?:[A-Z][a-z]+(?:\d+(?:\.\d+)?)?[\s\-]?){2,4}(?:nanoparticle|nanowire|nanorod|nanostructure|nanocrystal|nanotube|nanosheet|nanoplate|nanocube|nanosphere|nanocluster|nanocomposite|thin\s*film|coating|layer|interface|boundary|defect|dislocation|twin|precipitate|grain|phase|structure|morphology|property|performance|mechanism|process|method|technique|analysis|simulation|model|design|optimization)\b'
+    # Noun phrase extraction for defect-engineered nanomaterials domain
+    noun_pattern = r'(?:[A-Z][a-z]+(?:\d+(?:\.\d+)?)?[\s\-]?){2,4}(?:nanoparticle|nanocrystal|nanostructure|nanowire|nanorod|nanosheet|nanoplate|nanocube|nanosphere|nanocluster|nanocomposite|defect|dislocation|twin|stacking\s*fault|slip\s*plane|grain\s*boundary|interface|boundary|precipitate|phase|structure|morphology|property|performance|mechanism|process|method|technique|analysis|simulation|model|design|optimization|sintering|diffusion|strain|stress)'
     matches = re.findall(noun_pattern, text, re.I)
     for m in matches:
         concept = m.lower().strip()
@@ -549,20 +527,27 @@ def extract_concepts_from_text(text: str) -> List[str]:
             concepts.add(concept)
     # Context-based extraction around domain keywords
     for keyword in ALL_DOMAIN_KEYWORDS:
-        for match in re.finditer(r'\b' + re.escape(keyword) + r'\b', text_lower):
+        for match in re.finditer(r'' + re.escape(keyword) + r'', text_lower):
             start = max(0, match.start() - 100)
             end = min(len(text), match.end() + 100)
             context = text_lower[start:end]
-            context_phrases = re.findall(r'\b([a-z]+(?:\s+[a-z]+){1,3})\s+(?:of|for|in|with|using|via|through|by|to|and|or)\s+' + re.escape(keyword) + r'\b', context)
+            context_phrases = re.findall(r'([a-z]+(?:\s+[a-z]+){1,3})\s+(?:of|for|in|with|using|via|through|by|to|and|or)\s+' + re.escape(keyword) + r'', context)
             for phrase in context_phrases:
                 concept = f"{phrase.strip()} {keyword}"
                 if is_valid_nanomaterials_concept(concept):
                     concepts.add(concept)
-    # Material-property pairs
-    material_prop_pattern = r'\b([A-Z][a-z]+(?:\d+(?:\.\d+)?)?(?:[\s\-][A-Z][a-z]?\d*)+)\b\s+(?:with|having|exhibiting|showing|demonstrating|achieving|reaching|delivering|providing|offering)\s+(?:a\s+)?([\d\.]+\s*(?:nm|um|µm|angstrom|å|nm/riu|mv/dec|ma/cm2|s/cm|w/mk))\b'
-    matches = re.findall(material_prop_pattern, text, re.I)
-    for material, value in matches:
-        concept = f"{material.lower()} {value.lower()}"
+    # Defect-property pairs
+    defect_prop_pattern = r'(stacking\s*fault|deformation\s*twin|partial\s*dislocation|planar\s*defect|coherent\s*twin|vacancy|grain\s*boundary|surface)\s+(?:with|having|exhibiting|showing|demonstrating|achieving|reaching|delivering|providing|offering)\s+(?:a\s+)?([\d\.]+\s*(?:ev|gpa|nm|um|µm|angstrom|å|k|°c|percent|x|times))'
+    matches = re.findall(defect_prop_pattern, text, re.I)
+    for defect, value in matches:
+        concept = f"{defect.lower()} {value.lower()}"
+        if is_valid_nanomaterials_concept(concept):
+            concepts.add(concept)
+    # Stress-diffusion pairs
+    stress_diffusion_pattern = r'(stress[-\s]*mediated|stress[-\s]*assisted|vacancy[-\s]*mediated|atomic|surface|grain\s*boundary)\s+(?:diffusion|transport|migration)'
+    matches = re.findall(stress_diffusion_pattern, text, re.I)
+    for m in matches:
+        concept = m.lower().strip()
         if is_valid_nanomaterials_concept(concept):
             concepts.add(concept)
     return list(concepts)
@@ -576,19 +561,36 @@ def extract_concepts_from_abstracts(df: pd.DataFrame, text_columns: List[str]) -
             if col in row and pd.notna(row[col]):
                 combined_text += " " + str(row[col])
         metrics = {}
-        # Extract core-shell specific metrics
+        # Extract defect-engineered nanoparticle specific metrics
         size_matches = re.findall(r'(\d+(?:\.\d+)?)\s*(?:nm|um|µm)', combined_text, re.I)
         if size_matches: metrics['size_nm_um'] = [float(m) for m in size_matches]
-        shell_matches = re.findall(r'shell\s*(?:thickness|width)\s*(?:of|is|=|:)?\s*(\d+(?:\.\d+)?)\s*(?:nm|um|µm)', combined_text, re.I)
-        if shell_matches: metrics['shell_thickness_nm'] = [float(m) for m in shell_matches]
-        core_matches = re.findall(r'core\s*(?:diameter|size|radius)\s*(?:of|is|=|:)?\s*(\d+(?:\.\d+)?)\s*(?:nm|um|µm)', combined_text, re.I)
-        if core_matches: metrics['core_diameter_nm'] = [float(m) for m in core_matches]
-        wavelength_matches = re.findall(r'(\d+(?:\.\d+)?)\s*(?:nm)\s*(?:plasmon|peak|absorption|extinction|wavelength|spr|lspr)', combined_text, re.I)
-        if wavelength_matches: metrics['plasmon_peak_nm'] = [float(m) for m in wavelength_matches]
-        sensitivity_matches = re.findall(r'(\d+(?:\.\d+)?)\s*(?:nm/riu|nm/riU)', combined_text, re.I)
-        if sensitivity_matches: metrics['refractive_index_sensitivity'] = [float(m) for m in sensitivity_matches]
-        enhancement_matches = re.findall(r'(\d+(?:\.\d+)?)\s*(?:x|×|\*)?\s*(?:enhancement\s*factor|ef|sers\s*ef)', combined_text, re.I)
-        if enhancement_matches: metrics['enhancement_factor'] = [float(m) for m in enhancement_matches]
+        # Stacking fault energy metrics
+        sf_energy_matches = re.findall(r'(\d+(?:\.\d+)?)\s*(?:mj/m²|mj/m\^2|erg/cm\^2)', combined_text, re.I)
+        if sf_energy_matches: metrics['stacking_fault_energy'] = [float(m) for m in sf_energy_matches]
+        # Vacancy formation energy
+        vacancy_energy_matches = re.findall(r'vacancy\s*formation\s*(?:energy)?\s*(?:of|is|=|:)?\s*(\d+(?:\.\d+)?)\s*(?:ev|kj/mol)', combined_text, re.I)
+        if vacancy_energy_matches: metrics['vacancy_formation_energy_ev'] = [float(m) for m in vacancy_energy_matches]
+        # Migration barrier
+        migration_matches = re.findall(r'migration\s*(?:barrier|energy)\s*(?:of|is|=|:)?\s*(\d+(?:\.\d+)?)\s*(?:ev|kj/mol)', combined_text, re.I)
+        if migration_matches: metrics['migration_barrier_ev'] = [float(m) for m in migration_matches]
+        # Sintering temperature
+        sinter_temp_matches = re.findall(r'sinter(?:ing)?\s*(?:temperature)?\s*(?:of|is|=|:|at)?\s*(\d+(?:\.\d+)?)\s*(?:°c|k|celsius)', combined_text, re.I)
+        if sinter_temp_matches: metrics['sintering_temperature_c'] = [float(m) for m in sinter_temp_matches]
+        # Activation energy for diffusion
+        activation_matches = re.findall(r'activation\s*energy\s*(?:of|is|=|:)?\s*(\d+(?:\.\d+)?)\s*(?:ev|kj/mol)', combined_text, re.I)
+        if activation_matches: metrics['activation_energy_ev'] = [float(m) for m in activation_matches]
+        # Shear strength / mechanical properties
+        shear_matches = re.findall(r'shear\s*strength\s*(?:of|is|=|:)?\s*(\d+(?:\.\d+)?)\s*(?:mpa|gpa)', combined_text, re.I)
+        if shear_matches: metrics['shear_strength_mpa'] = [float(m) for m in shear_matches]
+        # Electrical conductivity
+        conductivity_matches = re.findall(r'electrical\s*conductivity\s*(?:of|is|=|:)?\s*(\d+(?:\.\d+)?)\s*(?:s/cm|ms/cm|s/m)', combined_text, re.I)
+        if conductivity_matches: metrics['electrical_conductivity_s_cm'] = [float(m) for m in conductivity_matches]
+        # Thermal conductivity
+        thermal_matches = re.findall(r'thermal\s*conductivity\s*(?:of|is|=|:)?\s*(\d+(?:\.\d+)?)\s*(?:w/mk|w/m·k)', combined_text, re.I)
+        if thermal_matches: metrics['thermal_conductivity_w_mk'] = [float(m) for m in thermal_matches]
+        # MSD (Mean Square Displacement)
+        msd_matches = re.findall(r'msd\s*(?:of|is|=|:)?\s*(\d+(?:\.\d+)?)\s*(?:Å²|angstrom\^2|nm\^2)', combined_text, re.I)
+        if msd_matches: metrics['msd_angstrom_sq'] = [float(m) for m in msd_matches]
         all_metrics.append(metrics)
         concepts = extract_concepts_from_text(combined_text)
         normalized = [normalize_nanomaterials_term(c) for c in concepts]
@@ -670,14 +672,20 @@ def abstract_concepts_to_categories(concepts: List[str]) -> Dict[str, str]:
                 matched = True
                 break
         if not matched:
-            if any(re.search(p, concept, re.I) for p in [r'\bcu@ag', r'\bag@cu', r'\bcore\s*shell']):
-                concept_to_abstract[concept] = 'core_shell_structure'
-            elif any(re.search(p, concept, re.I) for p in [r'\bbimetallic', r'\bcu\s*ag', r'\bag\s*cu']):
-                concept_to_abstract[concept] = 'bimetallic_system'
-            elif any(re.search(p, concept, re.I) for p in [r'\bseed\s*mediated', r'\bgalvanic', r'\bco-reduction']):
-                concept_to_abstract[concept] = 'synthesis_method'
-            elif any(re.search(p, concept, re.I) for p in [r'\blspr', r'\bsers', r'\bplasmon']):
-                concept_to_abstract[concept] = 'plasmonic_optical'
+            if any(re.search(p, concept, re.I) for p in [r'stacking\s*fault', r'deformation\s*twin', r'partial\s*dislocation', r'planar\s*defect', r'coherent\s*twin', r'nanotwinning']):
+                concept_to_abstract[concept] = 'defect_microstructure'
+            elif any(re.search(p, concept, re.I) for p in [r'stress[-\s]*mediated', r'stress[-\s]*assisted', r'vacancy[-\s]*mediated', r'atomic\s*diffusion', r'mass\s*transport', r'pipe[-\s]*diffusion']):
+                concept_to_abstract[concept] = 'diffusion_mechanism'
+            elif any(re.search(p, concept, re.I) for p in [r'lattice\s*strain', r'microstrain', r'hydrostatic\s*stress', r'von\s*mises', r'eigenstrain', r'configurational\s*force']):
+                concept_to_abstract[concept] = 'stress_strain_field'
+            elif any(re.search(p, concept, re.I) for p in [r'phase[-\s]*field', r'allen[-\s]*cahn', r'gated\s*attention', r'g[-\s]*adw', r'lammps', r'vasp', r'eam', r'dft', r'molecular\s*dynamics']):
+                concept_to_abstract[concept] = 'computational_ai_method'
+            elif any(re.search(p, concept, re.I) for p in [r'pressureless\s*sintering', r'ultra[-\s]*low', r'power\s*electronics', r'die[-\s]*attach', r'electronic\s*packaging']):
+                concept_to_abstract[concept] = 'sintering_application'
+            elif any(re.search(p, concept, re.I) for p in [r'aberration[-\s]*corrected', r'geometric\s*phase', r'williamson[-\s]*hall', r'fwhm', r'fft', r'xrd', r'xps', r'eds']):
+                concept_to_abstract[concept] = 'advanced_characterization'
+            elif any(re.search(p, concept, re.I) for p in [r'silver\s*nanoparticles', r'ag\s*nanoparticles', r'nano[-\s]*silver', r'ag\s*nps', r'fcc\s*ag', r'face[-\s]*centered\s*cubic']):
+                concept_to_abstract[concept] = 'core_material_system'
             else:
                 concept_to_abstract[concept] = 'general'
     return concept_to_abstract
@@ -1247,7 +1255,7 @@ def generate_analysis_report(data, metrics, val_metrics, top_scores, distill_df,
                              burst_df, bridge_df, motif_data, drift_df, genealogy_df):
     """Generate a comprehensive Markdown report of the analysis."""
     report = []
-    report.append("# NanoGraph-Explorer Analysis Report")
+    report.append("# NanoGraph-Explorer: Defect Engineering Analysis Report")
     report.append(f"\n**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
     report.append("## 1. Dataset Overview")
     report.append(f"- **Total Concepts:** {len(data['valid_concepts'])}")
@@ -1311,7 +1319,7 @@ def export_publication_figure(nx_graph, concept_abstract_map, valid_concepts,
         nx.draw_networkx_nodes(nx_graph, pos, node_color=node_colors, node_size=node_sizes,
                                alpha=0.9, edgecolors='white', linewidths=1)
         nx.draw_networkx_labels(nx_graph, pos, font_size=6, font_weight='bold')
-        plt.title("Core-Shell Ag-Cu Nanostructure Concept Network", fontsize=14, fontweight='bold')
+        plt.title("Defect-Engineered Nanomaterial Concept Network", fontsize=14, fontweight='bold')
         plt.axis('off')
     elif figure_type == "degree_distribution":
         degrees = [d for n, d in nx_graph.degree()]
@@ -1476,41 +1484,34 @@ def apply_graph_edits(nx_graph, concept_abstract_map, valid_concepts, edits):
 def get_nanomaterials_category_color(concept: str, cmap_colors: Optional[List[str]] = None) -> str:
     if cmap_colors:
         return cmap_colors[hash(concept) % len(cmap_colors)]
+
     concept_lower = concept.lower()
-    if any(c in concept_lower for c in ['cu@ag', 'ag@cu', 'cu/ag', 'ag/cu', 'core shell']):
+
+    # 1. Defect & Microstructure (Deep Red)
+    if any(c in concept_lower for c in ['stacking fault', 'deformation twin', 'intrinsic stacking', 'extrinsic stacking', 'coherent twin', 'planar defect', 'partial dislocation', 'nanotwinning', 'twin boundary', 'shockley partial']):
+        return "#D32F2F"
+    # 2. Stress & Strain Field (Orange)
+    elif any(c in concept_lower for c in ['lattice strain', 'microstrain', 'hydrostatic stress', 'von mises', 'eigenstrain', 'microstress', 'configurational force', 'lattice distortion']):
+        return "#F57C00"
+    # 3. Diffusion Mechanism (Amber)
+    elif any(c in concept_lower for c in ['vacancy formation', 'migration barrier', 'diffusion activation', 'mean square displacement', 'msd', 'atomic diffusion', 'mass transport', 'pipe-diffusion', 'surface diffusion']):
+        return "#FFA000"
+    # 4. Computational & AI Method (Green)
+    elif any(c in concept_lower for c in ['phase-field', 'pfm', 'allen-cahn', 'gated attention', 'g-adw', 'transformer', 'multiscale', 'lammps', 'vasp', 'eam', 'gsfe', 'dft', 'molecular dynamics']):
+        return "#388E3C"
+    # 5. Sintering & Application (Blue)
+    elif any(c in concept_lower for c in ['pressureless sintering', 'ultra-low', 'sintering temperature', 'power electronics', 'die-attach', 'electronic packaging', 'thermal interface', 'sic', 'gan']):
         return "#1976D2"
-    elif any(c in concept_lower for c in ['bimetallic', 'cu ag', 'ag cu', 'copper silver']):
-        return "#0D47A1"
-    elif any(c in concept_lower for c in ['lattice mismatch', 'misfit strain', 'interfacial strain', 'epitaxial', 'coherency']):
-        return "#E91E63"
-    elif any(c in concept_lower for c in ['shell thickness', 'core diameter', 'core size', 'morphology', 'dimension']):
-        return "#9C27B0"
-    elif any(c in concept_lower for c in ['interdiffusion', 'kirkendall', 'void formation', 'diffusion']):
-        return "#FF9800"
-    elif any(c in concept_lower for c in ['surface plasmon', 'lspr', 'sers', 'hot spot', 'extinction', 'plasmon peak']):
-        return "#F44336"
-    elif any(c in concept_lower for c in ['uv vis', 'absorption spectrum', 'refractive index']):
-        return "#FF5722"
-    elif any(c in concept_lower for c in ['seed mediated', 'galvanic', 'co-reduction', 'polyol', 'chemical reduction']):
-        return "#00BCD4"
-    elif any(c in concept_lower for c in ['pvp', 'ctab', 'oleylamine', 'oleic acid', 'capping agent', 'surfactant', 'ligand']):
-        return "#009688"
-    elif any(c in concept_lower for c in ['haadf', 'stem eds', 'tem eds', 'elemental mapping', 'line profile', 'eels']):
-        return "#3F51B5"
-    elif any(c in concept_lower for c in ['xrd', 'xps', 'dls', 'zeta', 'saxs', 'exafs', 'uv vis']):
-        return "#795548"
-    elif any(c in concept_lower for c in ['fdtd', 'dda', 'mie theory', 'comsol', 'lumerical', 'dft', 'molecular dynamics']):
-        return "#4CAF50"
-    elif any(c in concept_lower for c in ['catalytic', 'electrocatalysis', 'photocatalysis', 'synergistic']):
-        return "#8BC34A"
-    elif any(c in concept_lower for c in ['antibacterial', 'antimicrobial', 'bactericidal', 'cytotoxicity', 'biocompatibility']):
-        return "#8E24AA"
-    elif any(c in concept_lower for c in ['electrical conductivity', 'sheet resistance', 'conductive ink', 'interconnect']):
-        return "#FFC107"
-    elif any(c in concept_lower for c in ['thermal conductivity', 'thermal stability', 'thermal interface']):
-        return "#FFEB3B"
-    elif any(c in concept_lower for c in ['biosensor', 'chemical sensor', 'gas sensor', 'photothermal']):
-        return "#00E676"
+    # 6. Synthesis & Processing (Purple)
+    elif any(c in concept_lower for c in ['plastic deformation', 'centrifugation', 'die-casting', 'polyol', 'solid-state', 'uniaxial']):
+        return "#7B1FA2"
+    # 7. Advanced Characterization (Teal)
+    elif any(c in concept_lower for c in ['aberration-corrected', 'ac-tem', 'geometric phase', 'gpa', 'williamson-hall', 'fwhm', 'fft', 'xrd']):
+        return "#00796B"
+    # 8. Core Material System (Brown)
+    elif any(c in concept_lower for c in ['silver nanoparticles', 'ag nanoparticles', 'nano-silver', 'ag nps', 'fcc ag', 'face-centered cubic']):
+        return "#5D4037"
+    # Fallback
     else:
         return "#9E9E9E"
 
@@ -1797,20 +1798,20 @@ def render_graph_fallback(nx_graph, concept_abstract_map, theme=None):
     if len(nx_graph.nodes()) == 0:
         st.info("No graph data to display.")
         return
-    st.markdown(f"### 📊 Graph Summary (Text View)")
+    st.markdown(f"### 📊 Defect Engineering Graph Summary (Text View)")
     st.markdown(f"- **Nodes**: {len(nx_graph.nodes())}")
     st.markdown(f"- **Edges**: {len(nx_graph.edges())}")
     if len(nx_graph.edges()) > 0:
         edge_list = [(u, v, nx_graph[u][v].get('weight', 1)) for u, v in nx_graph.edges()]
         edge_list.sort(key=lambda x: x[2], reverse=True)
-        st.markdown("**🔗 Top 20 Strongest Connections:**")
+        st.markdown("**🔗 Top 20 Strongest Defect Engineering Connections:**")
         for i, (u, v, w) in enumerate(edge_list[:20], 1):
             edge_type = nx_graph[u][v].get('edge_type', 'unknown')
             st.markdown(f"{i}. `{u}` ↔ `{v}` (weight: {w:.2f}, type: {edge_type})")
     if len(concept_abstract_map) > 0:
         freq_data = [(c, len(concept_abstract_map.get(c, []))) for c in nx_graph.nodes()]
         freq_data.sort(key=lambda x: x[1], reverse=True)
-        st.markdown("**📈 Top Concepts by Frequency:**")
+        st.markdown("**📈 Top Defect Engineering Concepts by Frequency:**")
         st.dataframe(pd.DataFrame(freq_data[:15], columns=["Concept", "Abstract Count"]), use_container_width=True)
 
 # ==============================================================================
@@ -2152,7 +2153,7 @@ def render_sunburst_chart(labels, parents, values, cmap_name="viridis", label_si
         hovertemplate='<b>%{label}</b><br>Value: %{value}<br>Parent: %{parent}<extra></extra>'
     ))
     fig.update_layout(
-        title="<b>Core-Shell Ag-Cu Nanostructure Domain Hierarchy</b><br><i>Size = concept frequency</i>",
+        title="<b>Defect-Engineered Nanomaterial Domain Hierarchy</b><br><i>Size = concept frequency</i>",
         font=dict(size=label_size, family="Arial"),
         paper_bgcolor="white", plot_bgcolor="white",
         width=width, height=height,
@@ -2414,13 +2415,12 @@ def render_sidebar():
         )
         theme = THEME_PRESETS[st.session_state['theme']]
         st.subheader("🔬 Nanomaterials Focus Areas")
-        st.markdown("- Core-shell Cu@Ag / Ag@Cu nanoparticles")
-        st.markdown("- Bimetallic Ag-Cu nanostructures")
-        st.markdown("- Synthesis (seed-mediated growth, galvanic replacement, co-reduction)")
-        st.markdown("- Interfacial engineering (lattice mismatch, epitaxial growth, interdiffusion)")
-        st.markdown("- Functional properties (plasmonics, SERS, catalysis, antibacterial)")
-        st.markdown("- Characterization (HAADF-STEM, EDS mapping, UV-Vis, XRD peak shifts)")
-        st.markdown("- Computational methods (FDTD, DDA, DFT, MD)")
+        st.markdown("- Defect-engineered Silver (Ag) nanoparticles")
+        st.markdown("- Stacking faults (ISF/ESF), deformation twins, and partial dislocations")
+        st.markdown("- Stress-mediated diffusion and vacancy migration mechanisms")
+        st.markdown("- Ultra-low-temperature pressureless sintering")
+        st.markdown("- Phase-field modeling (PFM), MD, DFT, and Gated Attention AI")
+        st.markdown("- Applications in SiC/GaN power electronics packaging")
         st.subheader("🖼️ Visualization")
         st.session_state['viz_backend'] = st.selectbox(
             "Engine:", ["PyVis (Interactive)", "Plotly 2D", "Plotly 3D", "Text Summary"], index=0
@@ -2611,8 +2611,8 @@ def render_sidebar():
 # MAIN FUNCTION (Fully Enhanced)
 # ==============================================================================
 def main():
-    st.title("🔬 NanoGraph-Explorer: Core-Shell Ag-Cu Nanostructure Analytics")
-    st.caption("Publication-ready concept graph analytics for Ag-Cu and Cu@Ag core-shell nanostructures • Plasmonics, Catalysis, Interfacial Engineering")
+    st.title("🔬 NanoGraph-Explorer: Defect-Engineered Nanomaterial Analytics")
+    st.caption("Publication-ready concept graph analytics for defect-engineered silver nanoparticles • Stacking Faults, Deformation Twins, Stress-Mediated Diffusion, Ultra-Low-Temperature Sintering")
     render_sidebar()
     if "analysis_data" not in st.session_state:
         st.session_state.analysis_data = None
@@ -2821,7 +2821,7 @@ def main():
             "📐 Validation", "🌟 Extra Viz", "🔬 Advanced Analytics", "📥 Export"
         ])
         with viz_tab:
-            st.subheader("🌐 Interactive Concept Graph")
+            st.subheader("🌐 Interactive Defect Engineering Concept Graph")
             if nx_graph.number_of_nodes() == 0:
                 st.warning("No nodes to display.")
                 return
