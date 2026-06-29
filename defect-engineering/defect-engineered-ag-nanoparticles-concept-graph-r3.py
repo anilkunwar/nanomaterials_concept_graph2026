@@ -339,20 +339,20 @@ ALL_DOMAIN_KEYWORDS = (CORE_MATERIALS + MATERIAL_PROPERTIES + SYNTHESIS_METHODS 
 
 NANOMATERIALS_PATTERNS = [
     # Defects and Microstructure
-    r'(?:stacking\s*fault|deformation\s*twin|intrinsic\s*stacking\s*fault|extrinsic\s*stacking\s*fault|coherent\s*twin|planar\s*defect|partial\s*dislocation|shockley\s*partial)',
-    r'(?:fcc\s*\{111\}|close[-\s]*packed\s*planes|slip\s*planes|twin\s*boundary|nanotwinning)',
+    r'\b(?:stacking\s*fault|deformation\s*twin|intrinsic\s*stacking\s*fault|extrinsic\s*stacking\s*fault|coherent\s*twin|planar\s*defect|partial\s*dislocation|shockley\s*partial)\b',
+    r'\b(?:fcc\s*\{111\}|close[-\s]*packed\s*planes|slip\s*planes|twin\s*boundary|nanotwinning)\b',
     # Stress and Strain
-    r'(?:lattice\s*strain|microstrain|hydrostatic\s*stress|von\s*mises\s*stress|eigenstrain|microstress|configurational\s*force)',
+    r'\b(?:lattice\s*strain|microstrain|hydrostatic\s*stress|von\s*mises\s*stress|eigenstrain|microstress|configurational\s*force)\b',
     # Diffusion and Thermodynamics
-    r'(?:vacancy\s*formation\s*energy|migration\s*barrier|diffusion\s*activation\s*energy|mean\s*square\s*displacement|msd|atomic\s*diffusion|mass\s*transport|pipe[-\s]*diffusion)',
+    r'\b(?:vacancy\s*formation\s*energy|migration\s*barrier|diffusion\s*activation\s*energy|mean\s*square\s*displacement|msd|atomic\s*diffusion|mass\s*transport|pipe[-\s]*diffusion)\b',
     # Sintering and Applications
-    r'(?:pressureless\s*sintering|ultra[-\s]*low[-\s]*temperature\s*sintering|sintering\s*temperature|power\s*electronics\s*packaging|die[-\s]*attach|sic/gan)',
+    r'\b(?:pressureless\s*sintering|ultra[-\s]*low[-\s]*temperature\s*sintering|sintering\s*temperature|power\s*electronics\s*packaging|die[-\s]*attach|sic/gan)\b',
     # Computational and AI
-    r'(?:phase[-\s]*field|pfm|allen[-\s]*cahn|gated\s*attention|g[-\s]*adw|transformer[-\s]*attention|multiscale\s*modeling|lammps|vasp|eam\s*potential|gsfe)',
+    r'\b(?:phase[-\s]*field|pfm|allen[-\s]*cahn|gated\s*attention|g[-\s]*adw|transformer[-\s]*attention|multiscale\s*modeling|lammps|vasp|eam\s*potential|gsfe)\b',
     # Synthesis and Characterization
-    r'(?:plastic\s*deformation|centrifugation|die[-\s]*casting|polyol\s*method|ac[-\s]*tem|geometric\s*phase\s*analysis|gpa|williamson[-\s]*hall)',
+    r'\b(?:plastic\s*deformation|centrifugation|die[-\s]*casting|polyol\s*method|ac[-\s]*tem|geometric\s*phase\s*analysis|gpa|williamson[-\s]*hall)\b',
     # Materials
-    r'(?:silver\s*nanoparticles|ag\s*nanoparticles|nano[-\s]*silver|ag\s*nps|fcc\s*ag|face[-\s]*centered\s*cubic\s*silver)'
+    r'\b(?:silver\s*nanoparticles|ag\s*nanoparticles|nano[-\s]*silver|ag\s*nps|fcc\s*ag|face[-\s]*centered\s*cubic\s*silver)\b'
 ]
 
 NANOMATERIALS_CATEGORY_MAPPING = {
@@ -411,8 +411,8 @@ def get_adaptive_config(num_abstracts: int) -> Dict[str, Any]:
         }
     else:
         return {
-            "MIN_CONCEPT_FREQ": 5, "MIN_CONCEPT_LENGTH_WORDS": 2,
-            "MIN_DEGREE": 3, "USE_SEMANTIC_CLUSTERING": False,
+            "MIN_CONCEPT_FREQ": 2, "MIN_CONCEPT_LENGTH_WORDS": 2,
+            "MIN_DEGREE": 1, "USE_SEMANTIC_CLUSTERING": False,
             "SIMILARITY_THRESHOLD": 0.85, "COOCCURRENCE_WEIGHT": 0.9,
             "SEMANTIC_WEIGHT": 0.1, "CLUSTER_SIMILARITY": 0.68,
             "TOP_N_CONCEPTS": 1000, "MAX_CONCEPT_LENGTH": 10
@@ -434,20 +434,27 @@ def load_embedding_model():
 # CONCEPT EXTRACTION & NORMALIZATION
 # ==============================================================================
 def is_valid_nanomaterials_concept(concept: str) -> bool:
-    concept_lower = concept.lower()
-    has_domain = any(kw.lower() in concept_lower for kw in ALL_DOMAIN_KEYWORDS)
-    has_pattern = any(re.search(p, concept, re.I) for p in NANOMATERIALS_PATTERNS)
+    concept_lower = concept.lower().strip()
+    # Must have at least 2 words and at most 10 words
+    words = concept_lower.split()
+    if len(words) < 2 or len(words) > 10:
+        return False
+    # Must not be purely generic
     generic = {'study', 'analysis', 'effect', 'role', 'investigation', 'research',
                'method', 'approach', 'paper', 'work', 'using', 'based', 'novel',
                'new', 'recent', 'various', 'different', 'significant', 'important',
                'report', 'demonstrate', 'show', 'result', 'data', 'find',
                'however', 'therefore', 'thus', 'moreover', 'furthermore',
                'additionally', 'consequently', 'meanwhile', 'subsequently'}
-    has_generic = any(term in concept_lower.split() for term in generic)
-    words = concept.split()
-    if len(words) < 2 or len(words) > 10:
-        return False
-    return (has_domain or has_pattern) and not has_generic
+    # Check if concept is ONLY generic words (all words are generic)
+    has_generic = any(term in words for term in generic)
+    # Check domain relevance: either matches a keyword or a pattern
+    has_domain = any(kw.lower() in concept_lower for kw in ALL_DOMAIN_KEYWORDS)
+    has_pattern = any(re.search(p, concept, re.I) for p in NANOMATERIALS_PATTERNS)
+    # More permissive: accept if it has domain relevance OR is a reasonable technical term
+    # (at least 2 words, not too short, not purely generic)
+    is_technical = len(concept) > 8 and not all(w in generic for w in words)
+    return (has_domain or has_pattern or is_technical) and not has_generic
 
 def normalize_nanomaterials_term(concept: str) -> str:
     concept = concept.lower().strip()
@@ -519,7 +526,7 @@ def extract_concepts_from_text(text: str) -> List[str]:
             if len(concept.split()) >= 1 and len(concept) > 3:
                 concepts.add(concept)
     # Noun phrase extraction for defect-engineered nanomaterials domain
-    noun_pattern = r'(?:[A-Z][a-z]+(?:\d+(?:\.\d+)?)?[\s\-]?){2,4}(?:nanoparticle|nanocrystal|nanostructure|nanowire|nanorod|nanosheet|nanoplate|nanocube|nanosphere|nanocluster|nanocomposite|defect|dislocation|twin|stacking\s*fault|slip\s*plane|grain\s*boundary|interface|boundary|precipitate|phase|structure|morphology|property|performance|mechanism|process|method|technique|analysis|simulation|model|design|optimization|sintering|diffusion|strain|stress)'
+    noun_pattern = r'\b(?:[A-Z][a-z]+(?:\d+(?:\.\d+)?)?[\s\-]?){2,4}(?:nanoparticle|nanocrystal|nanostructure|nanowire|nanorod|nanosheet|nanoplate|nanocube|nanosphere|nanocluster|nanocomposite|defect|dislocation|twin|stacking\s*fault|slip\s*plane|grain\s*boundary|interface|boundary|precipitate|phase|structure|morphology|property|performance|mechanism|process|method|technique|analysis|simulation|model|design|optimization|sintering|diffusion|strain|stress)\b'
     matches = re.findall(noun_pattern, text, re.I)
     for m in matches:
         concept = m.lower().strip()
@@ -527,24 +534,24 @@ def extract_concepts_from_text(text: str) -> List[str]:
             concepts.add(concept)
     # Context-based extraction around domain keywords
     for keyword in ALL_DOMAIN_KEYWORDS:
-        for match in re.finditer(r'' + re.escape(keyword) + r'', text_lower):
+        for match in re.finditer(r'\b' + re.escape(keyword) + r'\b', text_lower):
             start = max(0, match.start() - 100)
             end = min(len(text), match.end() + 100)
             context = text_lower[start:end]
-            context_phrases = re.findall(r'([a-z]+(?:\s+[a-z]+){1,3})\s+(?:of|for|in|with|using|via|through|by|to|and|or)\s+' + re.escape(keyword) + r'', context)
+            context_phrases = re.findall(r'\b([a-z]+(?:\s+[a-z]+){1,3})\s+(?:of|for|in|with|using|via|through|by|to|and|or)\s+' + re.escape(keyword) + r'\b', context)
             for phrase in context_phrases:
                 concept = f"{phrase.strip()} {keyword}"
                 if is_valid_nanomaterials_concept(concept):
                     concepts.add(concept)
     # Defect-property pairs
-    defect_prop_pattern = r'(stacking\s*fault|deformation\s*twin|partial\s*dislocation|planar\s*defect|coherent\s*twin|vacancy|grain\s*boundary|surface)\s+(?:with|having|exhibiting|showing|demonstrating|achieving|reaching|delivering|providing|offering)\s+(?:a\s+)?([\d\.]+\s*(?:ev|gpa|nm|um|µm|angstrom|å|k|°c|percent|x|times))'
+    defect_prop_pattern = r'\b(stacking\s*fault|deformation\s*twin|partial\s*dislocation|planar\s*defect|coherent\s*twin|vacancy|grain\s*boundary|surface)\b\s+(?:with|having|exhibiting|showing|demonstrating|achieving|reaching|delivering|providing|offering)\s+(?:a\s+)?([\d\.]+\s*(?:ev|gpa|nm|um|µm|angstrom|å|k|°c|percent|x|times))\b'
     matches = re.findall(defect_prop_pattern, text, re.I)
     for defect, value in matches:
         concept = f"{defect.lower()} {value.lower()}"
         if is_valid_nanomaterials_concept(concept):
             concepts.add(concept)
     # Stress-diffusion pairs
-    stress_diffusion_pattern = r'(stress[-\s]*mediated|stress[-\s]*assisted|vacancy[-\s]*mediated|atomic|surface|grain\s*boundary)\s+(?:diffusion|transport|migration)'
+    stress_diffusion_pattern = r'\b(stress[-\s]*mediated|stress[-\s]*assisted|vacancy[-\s]*mediated|atomic|surface|grain\s*boundary)\b\s+(?:diffusion|transport|migration)\b'
     matches = re.findall(stress_diffusion_pattern, text, re.I)
     for m in matches:
         concept = m.lower().strip()
@@ -634,11 +641,13 @@ def normalize_and_filter_concepts(all_concepts: List[List[str]], config: Dict) -
                 concept_counts[c] += 1
                 concept_abstract_map[c].append(doc_idx)
                 seen_in_doc.add(c)
-    min_freq = config.get("MIN_CONCEPT_FREQ", 5)
+    min_freq = config.get("MIN_CONCEPT_FREQ", 1)
     min_words = config.get("MIN_CONCEPT_LENGTH_WORDS", 2)
     max_words = config.get("MAX_CONCEPT_LENGTH", 10)
+    # More lenient: if corpus is large, still allow lower frequency concepts
+    adaptive_min_freq = max(1, min(min_freq, len(all_concepts) // 200))
     valid_concepts = [c for c, cnt in concept_counts.items()
-                      if cnt >= min_freq and min_words <= len(c.split()) <= max_words]
+                      if cnt >= adaptive_min_freq and min_words <= len(c.split()) <= max_words]
     if config.get("USE_SEMANTIC_CLUSTERING", False) and len(valid_concepts) > 50:
         try:
             embed_model = load_embedding_model()
@@ -672,19 +681,19 @@ def abstract_concepts_to_categories(concepts: List[str]) -> Dict[str, str]:
                 matched = True
                 break
         if not matched:
-            if any(re.search(p, concept, re.I) for p in [r'stacking\s*fault', r'deformation\s*twin', r'partial\s*dislocation', r'planar\s*defect', r'coherent\s*twin', r'nanotwinning']):
+            if any(re.search(p, concept, re.I) for p in [r'\bstacking\s*fault', r'\bdeformation\s*twin', r'\bpartial\s*dislocation', r'\bplanar\s*defect', r'\bcoherent\s*twin', r'\bnanotwinning']):
                 concept_to_abstract[concept] = 'defect_microstructure'
-            elif any(re.search(p, concept, re.I) for p in [r'stress[-\s]*mediated', r'stress[-\s]*assisted', r'vacancy[-\s]*mediated', r'atomic\s*diffusion', r'mass\s*transport', r'pipe[-\s]*diffusion']):
+            elif any(re.search(p, concept, re.I) for p in [r'\bstress[-\s]*mediated', r'\bstress[-\s]*assisted', r'\bvacancy[-\s]*mediated', r'\batomic\s*diffusion', r'\bmass\s*transport', r'\bpipe[-\s]*diffusion']):
                 concept_to_abstract[concept] = 'diffusion_mechanism'
-            elif any(re.search(p, concept, re.I) for p in [r'lattice\s*strain', r'microstrain', r'hydrostatic\s*stress', r'von\s*mises', r'eigenstrain', r'configurational\s*force']):
+            elif any(re.search(p, concept, re.I) for p in [r'\blattice\s*strain', r'\bmicrostrain', r'\bhydrostatic\s*stress', r'\bvon\s*mises', r'\beigenstrain', r'\bconfigurational\s*force']):
                 concept_to_abstract[concept] = 'stress_strain_field'
-            elif any(re.search(p, concept, re.I) for p in [r'phase[-\s]*field', r'allen[-\s]*cahn', r'gated\s*attention', r'g[-\s]*adw', r'lammps', r'vasp', r'eam', r'dft', r'molecular\s*dynamics']):
+            elif any(re.search(p, concept, re.I) for p in [r'\bphase[-\s]*field', r'\ballen[-\s]*cahn', r'\bgated\s*attention', r'\bg[-\s]*adw', r'\blammps', r'\bvasp', r'\beam', r'\bdft', r'\bmolecular\s*dynamics']):
                 concept_to_abstract[concept] = 'computational_ai_method'
-            elif any(re.search(p, concept, re.I) for p in [r'pressureless\s*sintering', r'ultra[-\s]*low', r'power\s*electronics', r'die[-\s]*attach', r'electronic\s*packaging']):
+            elif any(re.search(p, concept, re.I) for p in [r'\bpressureless\s*sintering', r'\bultra[-\s]*low', r'\bpower\s*electronics', r'\bdie[-\s]*attach', r'\belectronic\s*packaging']):
                 concept_to_abstract[concept] = 'sintering_application'
-            elif any(re.search(p, concept, re.I) for p in [r'aberration[-\s]*corrected', r'geometric\s*phase', r'williamson[-\s]*hall', r'fwhm', r'fft', r'xrd', r'xps', r'eds']):
+            elif any(re.search(p, concept, re.I) for p in [r'\baberration[-\s]*corrected', r'\bgeometric\s*phase', r'\bwilliamson[-\s]*hall', r'\bfwhm', r'\bfft', r'\bxrd', r'\bxps', r'\beds']):
                 concept_to_abstract[concept] = 'advanced_characterization'
-            elif any(re.search(p, concept, re.I) for p in [r'silver\s*nanoparticles', r'ag\s*nanoparticles', r'nano[-\s]*silver', r'ag\s*nps', r'fcc\s*ag', r'face[-\s]*centered\s*cubic']):
+            elif any(re.search(p, concept, re.I) for p in [r'\bsilver\s*nanoparticles', r'\bag\s*nanoparticles', r'\bnano[-\s]*silver', r'\bag\s*nps', r'\bfcc\s*ag', r'\bface[-\s]*centered\s*cubic']):
                 concept_to_abstract[concept] = 'core_material_system'
             else:
                 concept_to_abstract[concept] = 'general'
@@ -1518,7 +1527,7 @@ def get_nanomaterials_category_color(concept: str, cmap_colors: Optional[List[st
 def render_graph_pyvis(nx_graph, concept_abstract_map, physics_enabled=True,
                        min_node_size=8, max_node_size=40, cmap_name="viridis",
                        custom_labels=None, node_label_size=12, top_n_nodes=0,
-                       theme=None, physics_preset=None):
+                       theme=None, physics_preset=None, edge_weight_visible=True):
     if top_n_nodes > 0 and len(nx_graph.nodes()) > top_n_nodes:
         degrees = dict(nx_graph.degree(weight='weight'))
         top_nodes = sorted(degrees.keys(), key=lambda x: degrees[x], reverse=True)[:top_n_nodes]
@@ -1639,15 +1648,18 @@ def render_graph_pyvis(nx_graph, concept_abstract_map, physics_enabled=True,
         edge_type = nx_graph[u][v].get('edge_type', 'unknown')
         color = color_map.get(edge_type, color_map['unknown'])
         width = float(np.clip(w * 0.4, 0.8, 3.5))
+        edge_label = f"{w:.1f}" if edge_weight_visible and w > 0 else ""
         net.add_edge(
             u, v,
             value=float(np.clip(w, 0.5, 5)),
             width=width,
+            label=edge_label,
+            font={'size': 9, 'color': theme['font'], 'background': theme['bg'], 'strokeWidth': 0},
             color={
                 'color': color,
                 'highlight': theme['highlight_bg'],
                 'hover': theme['hover_bg'],
-                'opacity': 0.85
+                'opacity': 0.85 if edge_weight_visible else 0.45
             },
             smooth={'type': 'continuous', 'roundness': 0.35},
             title=f"<span style='font-family:Inter,sans-serif;'>Weight: <b>{w:.2f}</b><br>Type: {edge_type}</span>"
@@ -2455,6 +2467,9 @@ def render_sidebar():
             base_preset["stabilization"] = st.session_state['adv_stabilization']
         st.session_state['effective_physics'] = base_preset
         st.subheader("📊 Display Limits")
+        st.session_state['edge_weight_visible'] = st.checkbox(
+            "🔢 Show edge weights on graph", value=True, key='edge_weight_toggle'
+        )
         col_all1, col_slider1 = st.columns([0.3, 0.7])
         with col_all1:
             all_graph = st.checkbox("All", value=True, key="all_graph_chk")
@@ -2834,9 +2849,11 @@ def main():
             physics_preset = st.session_state.get('effective_physics', PHYSICS_PRESETS["Stable (Default)"])
             top_n = st.session_state.get('top_n_graph', 0)
             if viz_choice == "PyVis (Interactive)":
+                edge_weight_vis = st.session_state.get('edge_weight_visible', True)
                 render_graph_pyvis(nx_graph, concept_abstract_map, physics_enabled=physics,
                                    cmap_name=cmap, top_n_nodes=top_n,
-                                   theme=theme, physics_preset=physics_preset)
+                                   theme=theme, physics_preset=physics_preset,
+                                   edge_weight_visible=edge_weight_vis)
             elif viz_choice == "Plotly 2D":
                 render_graph_plotly_2d(nx_graph, concept_abstract_map, cmap_name=cmap, top_n_nodes=top_n,
                                        theme=theme)
