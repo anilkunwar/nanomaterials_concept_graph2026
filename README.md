@@ -41,7 +41,7 @@
 
 [![integratedllmgraphnanomaterials](https://img.shields.io/badge/agnpnanocg-v5.2-red)](https://defect-engineered-ag-nanoparticles-concept-graph2.streamlit.app/) (Builds concept graph on defect engineered Ag nanoparticles, Keyterms made specific to category A - leans more to core-shell nanostructures)
 
-[![integratedllmgraphnanomaterials](https://img.shields.io/badge/agnpnanocg-v5.3-red)](https://defect-engineered-ag-nanoparticles-concept-graph3.streamlit.app/) (Builds concept graph on defect engineered Ag nanoparticles, Keyterms made specific to category A - leans more to defect engineering)
+[![integratedllmgraphnanomaterials](https://img.shields.io/badge/agnpnanocg-v5.3-red)](https://defect-engineered-ag-nanoparticles-concept-graph3.streamlit.app/) (Builds concept graph on defect engineered Ag nanoparticles, Keyterms made specific to category A - leans more to defect engineering, contains the edge weights)
 
 
 
@@ -52,12 +52,19 @@
 
 [![integratedllmgraphnanomaterials](https://img.shields.io/badge/ntcunanocg-v5.2-red)](https://nt-cu-via-electrodeposition-concept-graph2.streamlit.app/) (Builds concept graph on electrodeposited nt-Cu,  Keyterms made specific to category B)
 
+[![integratedllmgraphnanomaterials](https://img.shields.io/badge/ntcunanocg-v5.3-red)](https://nt-cu-via-electrodeposition-concept-graph3.streamlit.app/) (Builds concept graph on electrodeposited nt-Cu,  Keyterms made specific to category B)
+
+[![integratedllmgraphnanomaterials](https://img.shields.io/badge/ntcunanocg-v5.4-red)](https://nt-cu-via-electrodeposition-concept-graph4.streamlit.app/) (Builds concept graph on electrodeposited nt-Cu,  Keyterms made specific to category B, contains edge weights)
+
 
 # Focus on Cu@Ag Coreshell Nanostructures
 
 [![integratedllmgraphnanomaterials](https://img.shields.io/badge/coreshellnanocg-v5.1-red)](https://coreshell-structures-concept-graph1.streamlit.app/) (Builds concept graph on Cu@Ag coreshell nanostructures, Keyterms still more generic on al the categories)
 
 [![integratedllmgraphnanomaterials](https://img.shields.io/badge/coreshellnanocg-v5.2-red)](https://coreshell-structures-concept-graph2.streamlit.app/) (Builds concept graph on Cu@Ag coreshell nanostructures,  Keyterms made specific to category C)
+
+[![integratedllmgraphnanomaterials](https://img.shields.io/badge/coreshellnanocg-v5.3-red)](https://coreshell-structures-concept-graph3.streamlit.app/) (Builds concept graph on Cu@Ag coreshell nanostructures,  Keyterms made specific to category C, Excellent visualizations, No edge weight in the concept graph)
+
 
 
 
