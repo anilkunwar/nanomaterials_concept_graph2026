@@ -56,6 +56,8 @@
 
 [![integratedllmgraphnanomaterials](https://img.shields.io/badge/ntcunanocg-v5.4-red)](https://nt-cu-via-electrodeposition-concept-graph4.streamlit.app/) (Builds concept graph on electrodeposited nt-Cu,  Keyterms made specific to category B, contains edge weights)
 
+[![integratedllmgraphnanomaterials](https://img.shields.io/badge/ntcunanocg-v5.5-red)](https://nt-cu-via-electrodeposition-concept-graph5.streamlit.app/) (Builds concept graph on electrodeposited nt-Cu,  Keyterms made specific to category B, contains edge weights)
+
 
 # Focus on Cu@Ag Coreshell Nanostructures
 
