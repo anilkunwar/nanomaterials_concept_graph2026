@@ -288,8 +288,642 @@ def build_master_dataframe(file_records):
         df["Year"] = pd.to_numeric(df["Year"], errors="coerce")
     return df
 
- nanoparticle', concept)
+
+# ==========================================
+# NANOMATERIALS DOMAIN KNOWLEDGE BASE
+# ==========================================
+
+NANOMATERIALS_PATTERNS = [
+    r'\b(?:nanotwinned|nt)\s+cu(?:pper)?\b',
+    r'\bcu@ag\b',
+    r'\bcu/ag\b',
+    r'\bcore[-\s]?shell\s+(?:cu|ag|cu@ag|cu/ag)\b',
+    r'\bdefect[-\s]?engineered\s+(?:ag|silver)\b',
+    r'\btwin\s+boundary\b',
+    r'\bcoherent\s+twin\s+boundary\b',
+    r'\bincoherent\s+twin\s+boundary\b',
+    r'\bstacking\s+fault\b',
+    r'\bstacking\s+fault\s+energy\b',
+    r'\bdislocation\b',
+    r'\bgrain\s+boundary\b',
+    r'\belectrodeposition\b',
+    r'\bsputtering\b',
+    r'\bchemical\s+vapor\s+deposition\b',
+    r'\bdensity\s+functional\s+theory\b',
+    r'\bmolecular\s+dynamics\b',
+    r'\byield\s+strength\b',
+    r'\btensile\s+strength\b',
+    r'\belastic\s+modulus\b',
+    r'\bhardness\b',
+    r'\bductility\b',
+    r'\belongation\b',
+    r'\btransmission\s+electron\s+microscopy\b',
+    r'\belectron\s+backscatter\s+diffraction\b',
+    r'\bx[-\s]?ray\s+diffraction\b',
+    r'\bnano(?:particle|wire|rod|sheet|plate|cube|sphere|cluster|composite|structure|crystal|tube)\b',
+    r'\b(?:equal[-\s]?channel\s+angular\s+pressing|ecap)\b',
+    r'\bhigh[-\s]?pressure\s+torsion\b',
+    r'\baccumulative\s+roll\s+bonding\b',
+    r'\bfriction\s+stir\s+processing\b',
+    r'\bsevere\s+plastic\s+deformation\b',
+    r'\bphase\s+field\b',
+    r'\bfinite\s+element\b',
+    r'\b(?:machine\s+learning|neural\s+network|deep\s+learning)\b',
+    r'\b(?:vacancy|interstitial|frenkel|schottky)\b',
+    r'\b(?:irradiation|radiation)\s+(?:damage|defect)\b',
+    r'\bdefect\s+(?:engineering|design|tailoring)\b',
+]
+
+ALL_DOMAIN_KEYWORDS = [
+    "nanotwinned", "twin", "cu", "ag", "silver", "copper", "nanoparticle", "nanowire",
+    "nanorod", "nanosheet", "nanoplate", "nanocube", "nanosphere", "nanocluster",
+    "nanocomposite", "nanostructure", "nanocrystal", "nanotube", "thin film", "coating",
+    "electrodeposition", "sputtering", "cvd", "ald", "pld", "mbe", "evaporation",
+    "ecap", "hpt", "arb", "fsp", "spd", "ball milling", "cryorolling", "annealing",
+    "recrystallization", "grain growth", "tem", "hrtem", "stem", "ebsd", "xrd", "apt",
+    "eds", "eels", "synchrotron", "dft", "molecular dynamics", "md", "phase field",
+    "finite element", "ddd", "machine learning", "neural network", "gnn", "cnn",
+    "yield strength", "uts", "hardness", "elastic modulus", "young modulus", "ductility",
+    "elongation", "fracture", "fatigue", "creep", "wear", "damage", "twin boundary",
+    "stacking fault", "dislocation", "grain boundary", "vacancy", "interstitial",
+    "defect engineering", "irradiation", "sfe", "ctb", "itb", "crss", "gnd", "ssd",
+    "electrical conductivity", "resistivity", "thermal conductivity", "thermal expansion",
+    "corrosion", "oxidation", "electrochemical", "catalytic", "electrocatalysis",
+    "interconnect", "tsv", "solder", "conductive ink", "flexible", "transparent",
+]
+
+NANOMATERIALS_CATEGORY_MAPPING = {
+    r'\bnanotwinned\b': 'nanotwinned_copper',
+    r'\bnt\s+cu\b': 'nanotwinned_copper',
+    r'\bcu@ag\b': 'core_shell_cuag',
+    r'\bcu/ag\b': 'core_shell_cuag',
+    r'\bcore[-\s]?shell\b': 'core_shell_cuag',
+    r'\bdefect[-\s]?engineered\s+ag\b': 'defect_engineered_ag',
+    r'\bdefect[-\s]?engineered\s+silver\b': 'defect_engineered_ag',
+    r'\btwin\s+boundary\b': 'microstructure',
+    r'\bstacking\s+fault\b': 'microstructure',
+    r'\bdislocation\b': 'microstructure',
+    r'\bgrain\s+boundary\b': 'microstructure',
+    r'\bvacancy\b': 'defect',
+    r'\binterstitial\b': 'defect',
+    r'\belectrodeposition\b': 'synthesis',
+    r'\bsputtering\b': 'synthesis',
+    r'\bcvd\b': 'synthesis',
+    r'\bald\b': 'synthesis',
+    r'\becap\b': 'synthesis',
+    r'\bhpt\b': 'synthesis',
+    r'\btem\b': 'characterization',
+    r'\bhrtem\b': 'characterization',
+    r'\bebsd\b': 'characterization',
+    r'\bxrd\b': 'characterization',
+    r'\bdft\b': 'computational',
+    r'\bmolecular\s+dynamics\b': 'computational',
+    r'\byield\s+strength\b': 'mechanical_property',
+    r'\buts\b': 'mechanical_property',
+    r'\bhardness\b': 'mechanical_property',
+    r'\belastic\s+modulus\b': 'mechanical_property',
+    r'\bductility\b': 'mechanical_property',
+    r'\bfracture\b': 'mechanical_property',
+    r'\bfatigue\b': 'mechanical_property',
+    r'\belectrical\s+conductivity\b': 'functional_property',
+    r'\bthermal\s+conductivity\b': 'functional_property',
+    r'\bcorrosion\b': 'functional_property',
+    r'\bcatalytic\b': 'functional_property',
+    r'\bdefect\s+engineering\b': 'defect_engineering',
+    r'\birradiation\b': 'irradiation',
+}
+
+# ==========================================
+# CONCEPT VALIDATION & NORMALIZATION
+# ==========================================
+def is_valid_nanomaterials_concept(concept: str) -> bool:
+    """Validate if a concept string is meaningful for nanomaterials domain."""
+    if not concept or len(concept) < 3:
+        return False
+    if concept.isdigit():
+        return False
+    # Must contain at least one alphabetic character
+    if not any(c.isalpha() for c in concept):
+        return False
+    # Reject pure stopwords
+    stopwords = {"the", "and", "for", "with", "from", "this", "that", "these", "those",
+                 "are", "was", "were", "been", "have", "has", "had", "will", "would",
+                 "could", "should", "may", "might", "can", "shall", "about", "into",
+                 "over", "such", "than", "only", "also", "its", "our", "out", "all",
+                 "use", "used", "using", "based", "via", "due", "both", "each", "more",
+                 "most", "some", "any", "many", "much", "very", "well", "high", "low",
+                 "new", "different", "same", "various", "several", "certain", "particular"}
+    words = concept.lower().split()
+    if all(w in stopwords for w in words):
+        return False
+    return True
+
+def normalize_nanomaterials_term(concept: str) -> str:
+    """Normalize nanomaterials terminology for consistent concept representation."""
+    concept = concept.lower().strip()
+    # Normalize nanoparticle variants
+    concept = re.sub(r'\bnano[-\s]?particle\b', 'nanoparticle', concept)
+    concept = re.sub(r'\bnano[-\s]?particles\b', 'nanoparticle', concept)
+    concept = re.sub(r'\bnps\b', 'nanoparticle', concept)
+    # Normalize nanotwinned copper variants
+    concept = re.sub(r'\bnanotwinned\s+cu(?:pper)?\b', 'nanotwinned copper', concept)
+    concept = re.sub(r'\bnt\s+cu\b', 'nanotwinned copper', concept)
+    # Normalize core-shell
+    concept = re.sub(r'\bcore[-\s]?shell\s+cu@ag\b', 'core_shell_cuag', concept)
+    concept = re.sub(r'\bcore[-\s]?shell\s+cu/ag\b', 'core_shell_cuag', concept)
+    # Normalize defect-engineered silver
+    concept = re.sub(r'\bdefect[-\s]?engineered\s+ag\b', 'defect_engineered_ag', concept)
+    concept = re.sub(r'\bdefect[-\s]?engineered\s+silver\b', 'defect_engineered_ag', concept)
+    # Normalize twin boundary variants
+    concept = re.sub(r'\bcoherent\s+twin\s+boundary\b', 'ctb', concept)
+    concept = re.sub(r'\bincoherent\s+twin\s+boundary\b', 'itb', concept)
+    concept = re.sub(r'\btwin\s+boundary\b', 'twin_boundary', concept)
+    # Normalize nanoparticle shape variants
+    concept = re.sub(r'\bnano[-\s]?wire\b', 'nanowire', concept)
+    concept = re.sub(r'\bnano[-\s]?rod\b', 'nanorod', concept)
+    concept = re.sub(r'\bnano[-\s]?sheet\b', 'nanosheet', concept)
+    concept = re.sub(r'\bnano[-\s]?plate\b', 'nanoplate', concept)
+    concept = re.sub(r'\bnano[-\s]?cube\b', 'nanocube', concept)
+    concept = re.sub(r'\bnano[-\s]?sphere\b', 'nanosphere', concept)
+    concept = re.sub(r'\bnano[-\s]?cluster\b', 'nanocluster', concept)
+    concept = re.sub(r'\bnano[-\s]?composite\b', 'nanocomposite', concept)
+    concept = re.sub(r'\bnano[-\s]?structure\b', 'nanostructure', concept)
+    concept = re.sub(r'\bnano[-\s]?crystal\b', 'nanocrystal', concept)
+    concept = re.sub(r'\bnano[-\s]?tube\b', 'nanotube', concept)
     # Normalize mechanical properties
+    concept = re.sub(r'\byield\s*strength\b', 'yield strength', concept)
+    concept = re.sub(r'\bultimate\s*tensile\s*strength\b', 'uts', concept)
+    concept = re.sub(r'\btensile\s*strength\b', 'uts', concept)
+    concept = re.sub(r'\belastic\s*modulus\b', 'young modulus', concept)
+    concept = re.sub(r'\bstacking\s*fault\s*energy\b', 'sfe', concept)
+    concept = re.sub(r'\bcoherent\s*twin\s*boundary\b', 'ctb', concept)
+    concept = re.sub(r'\bincoherent\s*twin\s*boundary\b', 'itb', concept)
+    concept = re.sub(r'\bcritical\s*resolved\s*shear\s*stress\b', 'crss', concept)
+    concept = re.sub(r'\bgeometrically\s*necessary\s*dislocation\b', 'gnd', concept)
+    concept = re.sub(r'\bstatistically\s*stored\s*dislocation\b', 'ssd', concept)
+    concept = re.sub(r'\bstacking\s*fault\s*tetrahedron\b', 'sft', concept)
+    # v3.0: Defect engineering normalizations
+    concept = re.sub(r'\bpoint\s*defect\b', 'point_defect', concept)
+    concept = re.sub(r'\blattice\s*vacancy\b', 'vacancy', concept)
+    concept = re.sub(r'\bself\s*interstitial\b', 'interstitial', concept)
+    concept = re.sub(r'\bfrenkel\s*pair\b', 'frenkel_pair', concept)
+    concept = re.sub(r'\bschottky\s*defect\b', 'schottky_defect', concept)
+    concept = re.sub(r'\bedge\s*dislocation\b', 'edge_dislocation', concept)
+    concept = re.sub(r'\bscrew\s*dislocation\b', 'screw_dislocation', concept)
+    concept = re.sub(r'\bshockley\s*partial\b', 'shockley_partial', concept)
+    concept = re.sub(r'\bfrank\s*partial\b', 'frank_partial', concept)
+    concept = re.sub(r'\bdislocation\s*loop\b', 'dislocation_loop', concept)
+    concept = re.sub(r'\bdislocation\s*dipole\b', 'dislocation_dipole', concept)
+    concept = re.sub(r'\btwin\s*boundary\b', 'twin_boundary', concept)
+    concept = re.sub(r'\bcoherent\s*twin\s*boundary\b', 'ctb', concept)
+    concept = re.sub(r'\bincoherent\s*twin\s*boundary\b', 'itb', concept)
+    concept = re.sub(r'\bstacking\s*fault\b', 'stacking_fault', concept)
+    concept = re.sub(r'\bintrinsic\s*stacking\s*fault\b', 'intrinsic_sf', concept)
+    concept = re.sub(r'\bextrinsic\s*stacking\s*fault\b', 'extrinsic_sf', concept)
+    concept = re.sub(r'\bgrain\s*boundary\b', 'grain_boundary', concept)
+    concept = re.sub(r'\bhigh\s*angle\s*grain\s*boundary\b', 'high_angle_gb', concept)
+    concept = re.sub(r'\blow\s*angle\s*grain\s*boundary\b', 'low_angle_gb', concept)
+    concept = re.sub(r'\bdefect\s*engineering\b', 'defect_engineering', concept)
+    concept = re.sub(r'\bdefect\s*design\b', 'defect_design', concept)
+    concept = re.sub(r'\birradiation\s*damage\b', 'irradiation_damage', concept)
+    # Normalize synthesis
+    concept = re.sub(r'\belectrodeposition\b', 'electrodeposition', concept)
+    concept = re.sub(r'\belectroplating\b', 'electrodeposition', concept)
+    concept = re.sub(r'\bmagnetron\s*sputtering\b', 'sputtering', concept)
+    concept = re.sub(r'\bchemical\s*vapor\s*deposition\b', 'cvd', concept)
+    concept = re.sub(r'\batomic\s*layer\s*deposition\b', 'ald', concept)
+    concept = re.sub(r'\bequal\s*channel\s*angular\s*pressing\b', 'ecap', concept)
+    concept = re.sub(r'\bhigh\s*pressure\s*torsion\b', 'hpt', concept)
+    concept = re.sub(r'\baccumulative\s*roll\s*bonding\b', 'arb', concept)
+    concept = re.sub(r'\bfriction\s*stir\s*processing\b', 'fsp', concept)
+    # Normalize characterization
+    concept = re.sub(r'\btransmission\s*electron\s*microscopy\b', 'tem', concept)
+    concept = re.sub(r'\bhigh\s*resolution\s*tem\b', 'hrtem', concept)
+    concept = re.sub(r'\bscanning\s*transmission\s*electron\s*microscopy\b', 'stem', concept)
+    concept = re.sub(r'\belectron\s*backscatter\s*diffraction\b', 'ebsd', concept)
+    concept = re.sub(r'\bx-ray\s*diffraction\b', 'xrd', concept)
+    concept = re.sub(r'\batom\s*probe\s*tomography\b', 'apt', concept)
+    concept = re.sub(r'\benergy\s*dispersive\s*x-ray\b', 'eds', concept)
+    concept = re.sub(r'\belectron\s*energy\s*loss\s*spectroscopy\b', 'eels', concept)
+    # Normalize computational
+    concept = re.sub(r'\bdensity\s*functional\s*theory\b', 'dft', concept)
+    concept = re.sub(r'\bab\s*initio\b', 'ab initio', concept)
+    concept = re.sub(r'\bfirst\s*principles\b', 'first principles', concept)
+    concept = re.sub(r'\bmolecular\s*dynamics\b', 'molecular dynamics', concept)
+    concept = re.sub(r'\bphase\s*field\b', 'phase field', concept)
+    concept = re.sub(r'\bfinite\s*element\b', 'finite element', concept)
+    concept = re.sub(r'\bdiscrete\s*dislocation\s*dynamics\b', 'ddd', concept)
+    # Normalize units
+    concept = re.sub(r'\bgpa\b', 'gpa', concept)
+    concept = re.sub(r'\bmpa\b', 'mpa', concept)
+    concept = re.sub(r'\bnm\b', 'nm', concept)
+    concept = re.sub(r'\b\u00b5m\b', 'um', concept)
+    return concept
+
+# ==========================================
+# EMBEDDING MODEL LOADER
+# ==========================================
+@st.cache_resource(show_spinner=False)
+def load_embedding_model():
+    """Load and cache the sentence transformer embedding model."""
+    try:
+        model = SentenceTransformer('all-MiniLM-L6-v2')
+        return model
+    except Exception as e:
+        st.warning(f"Could not load sentence transformer model: {e}. Using fallback.")
+        # Return a minimal fallback that won't crash
+        class FallbackEmbedder:
+            def encode(self, texts, **kwargs):
+                if isinstance(texts, str):
+                    texts = [texts]
+                # Simple hash-based embedding as fallback
+                np.random.seed(42)
+                return np.array([np.random.randn(384) for _ in texts])
+        return FallbackEmbedder()
+
+# ==========================================
+# ADAPTIVE CONFIGURATION
+# ==========================================
+def get_adaptive_config(num_abstracts: int) -> Dict:
+    """Generate adaptive configuration based on dataset size."""
+    base_config = {
+        "MIN_CONCEPT_FREQ": max(1, min(5, num_abstracts // 100)),
+        "MIN_CONCEPT_LENGTH_WORDS": 2,
+        "MAX_CONCEPT_LENGTH": 10,
+        "TOP_N_CONCEPTS": min(1000, max(50, num_abstracts * 2)),
+        "USE_SEMANTIC_CLUSTERING": num_abstracts >= 20,
+        "CLUSTER_SIMILARITY": 0.72,
+        "SIMILARITY_THRESHOLD": 0.85,
+        "COOCCURRENCE_WEIGHT": 0.9,
+        "SEMANTIC_WEIGHT": 0.1,
+        "USE_INFERENCE": True,
+        "USE_CAUSAL_EXTRACTION": True,
+    }
+    return base_config
+
+# ==========================================
+# v3.0: ONTOLOGY & REASONING CLASSES
+# ==========================================
+class NanomaterialsOntology:
+    """v3.0: Rich ontology for nanomaterials domain with taxonomy and embeddings."""
+
+    def __init__(self):
+        self.concepts: Dict[str, ConceptNode] = {}
+        self.synonym_to_canonical: Dict[str, str] = {}
+        self._embeddings: Optional[np.ndarray] = None
+        self._concept_list: List[str] = []
+        self._embed_model = None
+        self._build_base_ontology()
+
+    def _build_base_ontology(self):
+        """Initialize base nanomaterials ontology concepts."""
+        # Materials
+        self._add_concept("nanotwinned copper", ConceptType.MATERIAL,
+                         synonyms={"nt cu", "nanotwinned cu", "nt copper"},
+                         definition="Copper with nanoscale twin boundaries")
+        self._add_concept("core_shell_cuag", ConceptType.MATERIAL,
+                         synonyms={"cu@ag", "cu/ag", "core-shell cu-ag"},
+                         definition="Core-shell copper-silver nanoparticles")
+        self._add_concept("defect_engineered_ag", ConceptType.MATERIAL,
+                         synonyms={"defect engineered silver", "ag defect"},
+                         definition="Silver with engineered defect structures")
+
+        # Microstructures
+        self._add_concept("twin_boundary", ConceptType.MICROSTRUCTURE,
+                         synonyms={"tb", "twin interface"},
+                         hypernyms={"grain_boundary"})
+        self._add_concept("ctb", ConceptType.MICROSTRUCTURE,
+                         synonyms={"coherent twin boundary"},
+                         hypernyms={"twin_boundary"})
+        self._add_concept("itb", ConceptType.MICROSTRUCTURE,
+                         synonyms={"incoherent twin boundary"},
+                         hypernyms={"twin_boundary"})
+        self._add_concept("stacking_fault", ConceptType.MICROSTRUCTURE,
+                         synonyms={"sf", "stacking fault"},
+                         hypernyms={"planar_defect"})
+        self._add_concept("dislocation", ConceptType.MICROSTRUCTURE,
+                         synonyms={"disl", "line defect"},
+                         hypernyms={"crystal_defect"})
+        self._add_concept("grain_boundary", ConceptType.MICROSTRUCTURE,
+                         synonyms={"gb", "grain interface"},
+                         hypernyms={"interface"})
+        self._add_concept("vacancy", ConceptType.DEFECT,
+                         synonyms={"lattice vacancy", "point defect"},
+                         hypernyms={"point_defect"})
+        self._add_concept("interstitial", ConceptType.DEFECT,
+                         synonyms={"self interstitial"},
+                         hypernyms={"point_defect"})
+
+        # Properties
+        self._add_concept("yield strength", ConceptType.PROPERTY,
+                         synonyms={"ys", "yield stress"})
+        self._add_concept("uts", ConceptType.PROPERTY,
+                         synonyms={"ultimate tensile strength", "tensile strength"})
+        self._add_concept("young modulus", ConceptType.PROPERTY,
+                         synonyms={"elastic modulus", "e-modulus", "modulus of elasticity"})
+        self._add_concept("hardness", ConceptType.PROPERTY,
+                         synonyms={"hv", "vickers hardness"})
+        self._add_concept("ductility", ConceptType.PROPERTY,
+                         synonyms={"elongation", "strain to failure"})
+        self._add_concept("sfe", ConceptType.PROPERTY,
+                         synonyms={"stacking fault energy", "gsfe"})
+
+        # Processes
+        self._add_concept("electrodeposition", ConceptType.PROCESS,
+                         synonyms={"electroplating", "electrochemical deposition"})
+        self._add_concept("sputtering", ConceptType.PROCESS,
+                         synonyms={"magnetron sputtering", "pvd"})
+        self._add_concept("cvd", ConceptType.PROCESS,
+                         synonyms={"chemical vapor deposition"})
+        self._add_concept("ecap", ConceptType.PROCESS,
+                         synonyms={"equal channel angular pressing", "ecap"})
+        self._add_concept("hpt", ConceptType.PROCESS,
+                         synonyms={"high pressure torsion"})
+        self._add_concept("annealing", ConceptType.PROCESS,
+                         synonyms={"heat treatment", "thermal treatment"})
+
+        # Methods
+        self._add_concept("tem", ConceptType.METHOD,
+                         synonyms={"transmission electron microscopy", "electron microscopy"})
+        self._add_concept("dft", ConceptType.METHOD,
+                         synonyms={"density functional theory", "ab initio", "first principles"})
+        self._add_concept("molecular dynamics", ConceptType.METHOD,
+                         synonyms={"md", "atomistic simulation"})
+
+        # Defect engineering
+        self._add_concept("defect_engineering", ConceptType.PROCESS,
+                         synonyms={"defect design", "defect tailoring"},
+                         definition="Controlled introduction and manipulation of defects")
+        self._add_concept("irradiation_damage", ConceptType.PHENOMENON,
+                         synonyms={"radiation damage", "ion implantation damage"})
+
+    def _add_concept(self, name: str, concept_type: ConceptType, synonyms: Set[str] = None,
+                     hypernyms: Set[str] = None, hyponyms: Set[str] = None,
+                     definition: str = ""):
+        """Add a concept to the ontology."""
+        node = ConceptNode(
+            canonical_name=name,
+            concept_type=concept_type,
+            synonyms=synonyms or set(),
+            hypernyms=hypernyms or set(),
+            hyponyms=hyponyms or set(),
+            definition=definition
+        )
+        self.concepts[name] = node
+        # Register synonyms
+        for syn in (synonyms or set()):
+            self.synonym_to_canonical[syn.lower()] = name
+        self.synonym_to_canonical[name.lower()] = name
+
+    def build_embeddings(self, embed_model):
+        """Build embedding cache for all ontology concepts."""
+        self._embed_model = embed_model
+        self._concept_list = list(self.concepts.keys())
+        if self._concept_list:
+            self._embeddings = embed_model.encode(self._concept_list, show_progress_bar=False, batch_size=64)
+
+    def get_concept_type(self, concept: str) -> ConceptType:
+        """Get the semantic type of a concept."""
+        canonical = self.synonym_to_canonical.get(concept.lower(), concept.lower())
+        if canonical in self.concepts:
+            return self.concepts[canonical].concept_type
+        # Heuristic fallback
+        c = concept.lower()
+        if any(x in c for x in ['strength', 'hardness', 'modulus', 'ductility', 'conductivity']):
+            return ConceptType.PROPERTY
+        elif any(x in c for x in ['electrodeposition', 'sputtering', 'annealing', 'ecap', 'hpt']):
+            return ConceptType.PROCESS
+        elif any(x in c for x in ['tem', 'ebsd', 'xrd', 'apt']):
+            return ConceptType.METHOD
+        elif any(x in c for x in ['dislocation', 'twin', 'grain', 'stacking fault', 'vacancy']):
+            return ConceptType.MICROSTRUCTURE
+        elif any(x in c for x in ['nanoparticle', 'nanowire', 'thin film', 'cu', 'ag']):
+            return ConceptType.MATERIAL
+        elif any(x in c for x in ['defect engineering', 'irradiation']):
+            return ConceptType.DEFECT if 'defect' in c else ConceptType.PHENOMENON
+        return ConceptType.GENERAL
+
+    def get_hypernyms(self, concept: str) -> Set[str]:
+        """Get hypernyms (is-a parents) of a concept."""
+        canonical = self.synonym_to_canonical.get(concept.lower(), concept.lower())
+        if canonical in self.concepts:
+            return self.concepts[canonical].hypernyms
+        return set()
+
+    def infer_path(self, source: str, target: str, max_depth: int = 2) -> List[List[str]]:
+        """Infer reasoning paths between concepts via shared ontology."""
+        paths = []
+        source_type = self.get_concept_type(source)
+        target_type = self.get_concept_type(target)
+
+        # Process -> Microstructure -> Property bridge
+        if source_type == ConceptType.PROCESS and target_type == ConceptType.PROPERTY:
+            # Find intermediate microstructure concepts
+            for concept_name, node in self.concepts.items():
+                if node.concept_type in (ConceptType.MICROSTRUCTURE, ConceptType.DEFECT):
+                    paths.append([source, concept_name, target])
+
+        # Material -> Property via Microstructure
+        if source_type == ConceptType.MATERIAL and target_type == ConceptType.PROPERTY:
+            for concept_name, node in self.concepts.items():
+                if node.concept_type == ConceptType.MICROSTRUCTURE:
+                    paths.append([source, concept_name, target])
+
+        return paths[:10]  # Limit paths
+
+
+class AdvancedConceptResolver:
+    """v3.0: Resolves raw text phrases to canonical ontology concepts with disambiguation."""
+
+    def __init__(self, ontology: NanomaterialsOntology, embed_model,
+                 similarity_threshold: float = 0.85):
+        self.ontology = ontology
+        self.embed_model = embed_model
+        self.similarity_threshold = similarity_threshold
+        self._resolution_cache: Dict[str, str] = {}
+
+    def resolve(self, phrase: str, context: str = "") -> str:
+        """Resolve a raw phrase to canonical concept form."""
+        phrase_lower = phrase.lower().strip()
+
+        # Check cache
+        if phrase_lower in self._resolution_cache:
+            return self._resolution_cache[phrase_lower]
+
+        # Check direct synonym match
+        if phrase_lower in self.ontology.synonym_to_canonical:
+            canonical = self.ontology.synonym_to_canonical[phrase_lower]
+            self._resolution_cache[phrase_lower] = canonical
+            return canonical
+
+        # Check fuzzy match against ontology
+        if self.ontology._embeddings is not None and self.ontology._concept_list:
+            try:
+                phrase_emb = self.embed_model.encode([phrase_lower], show_progress_bar=False)
+                sims = cosine_similarity(phrase_emb, self.ontology._embeddings)[0]
+                best_idx = np.argmax(sims)
+                if sims[best_idx] >= self.similarity_threshold:
+                    canonical = self.ontology._concept_list[best_idx]
+                    self._resolution_cache[phrase_lower] = canonical
+                    return canonical
+            except Exception:
+                pass
+
+        # Context disambiguation for ambiguous terms
+        if context:
+            disambiguated = self._disambiguate(phrase_lower, context)
+            if disambiguated:
+                self._resolution_cache[phrase_lower] = disambiguated
+                return disambiguated
+
+        # Return normalized form
+        normalized = normalize_nanomaterials_term(phrase_lower)
+        self._resolution_cache[phrase_lower] = normalized
+        return normalized
+
+    def _disambiguate(self, phrase: str, context: str) -> Optional[str]:
+        """Context-aware disambiguation for polysemous terms."""
+        context_lower = context.lower()
+
+        # "phase" disambiguation
+        if phrase == "phase":
+            if any(w in context_lower for w in ['thermodynamic', 'free energy', 'gibbs', 'enthalpy']):
+                return "thermodynamic_phase"
+            elif any(w in context_lower for w in ['microstructure', 'grain', 'precipitate', 'martensite']):
+                return "microstructural_phase"
+            return None
+
+        # "twin" disambiguation
+        if phrase in ["twin", "twinning"]:
+            if any(w in context_lower for w in ['deformation', 'mechanical', 'stress', 'strain']):
+                return "deformation_twinning"
+            elif any(w in context_lower for w in ['growth', 'annealing', 'thermal']):
+                return "annealing_twin"
+            return "twin_boundary"
+
+        # "defect" disambiguation
+        if phrase == "defect":
+            if any(w in context_lower for w in ['point defect', 'vacancy', 'interstitial']):
+                return "point_defect"
+            elif any(w in context_lower for w in ['dislocation', 'line defect']):
+                return "dislocation"
+            elif any(w in context_lower for w in ['grain boundary', 'interface']):
+                return "grain_boundary"
+            return None
+
+        return None
+
+
+class EnhancedConceptExtractor:
+    """v3.0: Extracts concepts and relationships from text with ontology awareness."""
+
+    # Causal trigger patterns for relationship extraction
+    CAUSAL_TRIGGERS = [
+        (r'\b(caused? by|results? in|leads? to|gives? rise to)\b', RelationshipType.CAUSES),
+        (r'\b(results? in|produces?|generates?|yields?)\b', RelationshipType.RESULTS_IN),
+        (r'\b(influences?|affects?|impacts?|modulates?)\b', RelationshipType.INFLUENCES),
+        (r'\b(enhances?|improves?|increases?|boosts?)\b', RelationshipType.INFLUENCES),
+        (r'\b(reduces?|decreases?|suppresses?|inhibits?)\b', RelationshipType.INFLUENCES),
+    ]
+
+    def __init__(self, ontology: NanomaterialsOntology, resolver: AdvancedConceptResolver):
+        self.ontology = ontology
+        self.resolver = resolver
+        self._global_phrases: Dict[str, int] = defaultdict(int)
+        self._global_resolutions: Dict[str, str] = {}
+
+    def extract_from_text(self, text: str) -> Set[str]:
+        """Extract concepts from text with ontology-aware resolution."""
+        concepts = set()
+        text_lower = text.lower()
+
+        # Pattern-based extraction
+        for pattern in NANOMATERIALS_PATTERNS:
+            matches = re.findall(pattern, text, re.I)
+            for m in matches:
+                if isinstance(m, tuple):
+                    m = m[0] if m[0] else m[1] if len(m) > 1 else str(m)
+                concept = str(m).lower().strip().rstrip('.').rstrip(',')
+                if len(concept) > 3 and is_valid_nanomaterials_concept(concept):
+                    resolved = self.resolver.resolve(concept, context=text)
+                    concepts.add(resolved)
+                    self._global_phrases[concept] += 1
+
+        # Keyword-based extraction with context
+        for keyword in ALL_DOMAIN_KEYWORDS:
+            for match in re.finditer(r'\b' + re.escape(keyword) + r'\b', text_lower):
+                start = max(0, match.start() - 100)
+                end = min(len(text), match.end() + 100)
+                context = text_lower[start:end]
+                # Extract noun phrases around keyword
+                context_phrases = re.findall(
+                    r'\b([a-z]+(?:\s+[a-z]+){1,3})\s+(?:of|for|in|with|using|via|through|by|to|and|or)\s+' + re.escape(keyword) + r'\b',
+                    context
+                )
+                for phrase in context_phrases:
+                    concept = f"{phrase.strip()} {keyword}"
+                    if is_valid_nanomaterials_concept(concept):
+                        resolved = self.resolver.resolve(concept, context=text)
+                        concepts.add(resolved)
+                        self._global_phrases[concept] += 1
+
+        # Direct keyword inclusion
+        for keyword in ALL_DOMAIN_KEYWORDS:
+            if re.search(r'\b' + re.escape(keyword) + r'\b', text_lower):
+                resolved = self.resolver.resolve(keyword, context=text)
+                concepts.add(resolved)
+                self._global_phrases[keyword] += 1
+
+        return concepts
+
+    def extract_relationships(self, text: str) -> List[Relationship]:
+        """Extract cause-effect relationships from text."""
+        relationships = []
+        sentences = re.split(r'[.!?]+', text)
+
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if len(sentence) < 10:
+                continue
+
+            # Extract concepts in this sentence
+            concepts_in_sent = list(self.extract_from_text(sentence))
+            if len(concepts_in_sent) < 2:
+                continue
+
+            # Look for causal triggers
+            for trigger_pattern, rel_type in self.CAUSAL_TRIGGERS:
+                if re.search(trigger_pattern, sentence, re.I):
+                    # Link concepts before and after trigger
+                    trigger_match = re.search(trigger_pattern, sentence, re.I)
+                    if trigger_match:
+                        before = sentence[:trigger_match.start()]
+                        after = sentence[trigger_match.end():]
+
+                        before_concepts = [c for c in concepts_in_sent if c.lower() in before.lower()]
+                        after_concepts = [c for c in concepts_in_sent if c.lower() in after.lower()]
+
+                        for src in before_concepts[:2]:  # Limit connections
+                            for tgt in after_concepts[:2]:
+                                if src != tgt:
+                                    relationships.append(Relationship(
+                                        source=src,
+                                        target=tgt,
+                                        rel_type=rel_type,
+                                        confidence=0.7,
+                                        evidence=sentence[:150]
+                                    ))
+
+        return relationships
+
+    def finalize_global_resolution(self) -> Dict[str, str]:
+        """Finalize global phrase-to-concept resolution map."""
+        # For phrases that appear frequently, ensure consistent mapping
+        for phrase, count in self._global_phrases.items():
+            if phrase not in self._global_resolutions:
+                self._global_resolutions[phrase] = self.resolver.resolve(phrase)
+        return self._global_resolutions
+
     concept = re.sub(r'\byield\s*strength\b', 'yield strength', concept)
     concept = re.sub(r'\bultimate\s*tensile\s*strength\b', 'uts', concept)
     concept = re.sub(r'\btensile\s*strength\b', 'uts', concept)
