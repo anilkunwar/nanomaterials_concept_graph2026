@@ -2362,6 +2362,9 @@ def detect_keyword_bursts(df, valid_concepts, concept_abstract_map):
                 "total_papers": len(years)
             })
 
+    # Prevent KeyError when no keyword bursts are detected
+    if not burst_data:
+        return pd.DataFrame()
     return pd.DataFrame(burst_data).sort_values("burst_score", ascending=False)
 
 
@@ -2570,6 +2573,9 @@ def detect_semantic_drift(df, valid_concepts, concept_abstract_map, embed_model)
                     'late_papers': len(late_texts)
                 })
 
+    # Prevent KeyError when no concepts meet the drift threshold
+    if not drift_data:
+        return pd.DataFrame()
     return pd.DataFrame(drift_data).sort_values("drift_score", ascending=False)
 
 
