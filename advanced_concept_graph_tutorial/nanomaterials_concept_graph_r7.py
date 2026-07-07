@@ -2295,7 +2295,7 @@ def render_tsne_projection(valid_concepts, concept_abstract_map, embed_model, cm
 
     embeddings = embed_model.encode(valid_concepts, show_progress_bar=False, batch_size=64)
     perplexity = min(30, len(valid_concepts) - 1)
-    tsne = TSNE(n_components=2, random_state=42, perplexity=perplexity, n_iter=1000)
+    tsne = TSNE(n_components=2, random_state=42, perplexity=perplexity, max_iter=1000)
     coords = tsne.fit_transform(embeddings)
 
     freqs = [len(concept_abstract_map.get(c, [])) for c in valid_concepts]
