@@ -3053,7 +3053,7 @@ def render_sidebar():
             "🏷️ Use N1/N2 abbreviated labels", value=False
         )
         st.session_state['max_label_length'] = st.slider(
-            "Max label length before abbreviation", 10, 50, 15, step=5
+            "Max label length before abbreviation", 2, 50, 15, step=1
         )
         st.session_state['edge_label_mode'] = st.selectbox(
             "Edge label mode:", ["hover", "threshold", "all", "none"]
