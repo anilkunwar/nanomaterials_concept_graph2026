@@ -1711,7 +1711,7 @@ def render_graph_pyvis(nx_graph, concept_abstract_map, physics_enabled=True,
                         custom_labels=None, node_label_size=12, top_n_nodes=0,
                         theme=None, physics_preset=None,
                         use_abbreviated_labels=False, max_label_length=15,
-                         edge_label_mode="hover", layout_mode="force-directed"):
+                        edge_label_mode="hover", layout_mode="force-directed"):
     """
     v3.1: Publication-ready PyVis with:
     - Multiple layout modes (force-directed, hierarchical, circular)
@@ -3189,30 +3189,480 @@ def render_sidebar():
 # MAIN APPLICATION
 # ==========================================
 def main():
-    st.title("🔬 Nanomaterials-ConceptGraph v3.1: Deep Semantic Reasoning Engine")
-    st.caption("Enhanced Sunburst • Hierarchical Layouts • Adaptive Contrast • Symbol Legends")
+    st.title("🔬 Nanomaterials-ConceptGraph v3.0: Deep Semantic Reasoning Engine")
+    st.caption("Ontology-aware reasoning • Embedding-based equivalence • Hierarchical taxonomy • Cross-domain inference • Cause-effect extraction • N1/N2 annotations • Symbol Sunburst")
     render_sidebar()
+    if "analysis_data" not in st.session_state:
+        st.session_state.analysis_data = None
+    if "input_hash" not in st.session_state:
+        st.session_state.input_hash = None
 
-    st.info("This is the v3.1 visualization enhancement module. Integrate these functions into your main v3.0 application.")
+    # ─── LOAD JSON DATA ───
+    st.header("📂 Data Loading")
+    st.info(f"Place JSON files in: `{JSON_METADATA_DIR}`")
+    with st.spinner("Scanning json_metadatabase..."):
+        file_records = load_all_json_files(JSON_METADATA_DIR)
+        df = build_master_dataframe(file_records)
+    if not file_records:
+        st.warning("No .json files found in the directory.")
+        st.info("Please place your JSON metadata files in the `json_metadatabase/` folder.")
+        return
+    successful_files = [f for f in file_records if f[1]]
+    if not successful_files:
+        st.error("Files found but none could be parsed. Check error messages above.")
+        return
+    st.success(f"Loaded {len(successful_files)} file(s) • {len(df)} record(s)")
+    file_names = [f[0] for f in successful_files]
+    selected_files = st.multiselect("Filter by source file", file_names, default=file_names)
+    if selected_files:
+        df_filtered = df[df["_source_file"].isin(selected_files)].copy()
+    else:
+        df_filtered = df.copy()
+    st.write(f"Working with **{len(df_filtered)}** records")
+    with st.expander("📋 Preview Data Structure"):
+        st.dataframe(df_filtered.head(5), use_container_width=True)
+        st.markdown("**Available columns:**")
+        st.write(list(df_filtered.columns))
 
-    st.markdown("""
-    ### 📋 Integration Instructions
-
-    1. **Replace** `render_graph_pyvis(, layout_mode=layout_mode)` in your v3.0 code with the v3.1 version above
-    2. **Replace** `render_sunburst_chart()` in your v3.0 code with the v3.1 version above  
-    3. **Replace** `render_sidebar()` in your v3.0 code with the v3.1 version above
-    4. **Add** `compute_node_layout()` as a new function
-    5. **Add** `_build_path()` as a new helper function
-    6. **Update** the `viz_tab` call in `main()` to pass `layout_mode`:
-
-    ```python
-    layout_mode = st.session_state.get("layout_mode", "force-directed")
-    render_graph_pyvis(
-        nx_graph, concept_abstract_map, ...,
-        layout_mode=layout_mode  # <-- ADD THIS
+    # ─── TEXT COLUMN SELECTION ───
+    text_cols = [c for c in df_filtered.columns if any(k in c.lower() for k in ['abstract', 'title', 'summary', 'text', 'content', 'description'])]
+    if not text_cols:
+        text_cols = [c for c in df_filtered.columns if df_filtered[c].dtype == 'object']
+    selected_text_cols = st.multiselect(
+        "Select text columns for concept extraction:",
+        options=text_cols,
+        default=text_cols[:2] if len(text_cols) >= 2 else text_cols
     )
-    ```
-    """)
+    if not selected_text_cols:
+        st.error("Please select at least one text column.")
+        return
+
+    # ─── RUN ANALYSIS ───
+    if st.button("🚀 Build Concept Graph", type="primary", use_container_width=True):
+        progress_bar = st.progress(0.0)
+        status = st.status("🔄 Initializing analysis...", expanded=True)
+        try:
+            with status:
+                st.write("📦 Preparing text corpus...")
+                all_texts = []
+                for idx, row in df_filtered.iterrows():
+                    text = " ".join([str(row[col]) for col in selected_text_cols if col in row and pd.notna(row[col])])
+                    all_texts.append(text)
+                num_abstracts = len(all_texts)
+                st.write(f"✅ Prepared {num_abstracts} documents")
+                progress_bar.progress(0.05)
+
+                st.write("🧠 Loading embedding model...")
+                embed_model = load_embedding_model()
+                st.success("✅ Embedding model loaded")
+                progress_bar.progress(0.10)
+
+                config = get_adaptive_config(num_abstracts)
+                config["MIN_CONCEPT_FREQ"] = st.session_state.get('min_freq', 5)
+                config["MIN_CONCEPT_LENGTH_WORDS"] = st.session_state.get('min_words', 2)
+                config["SIMILARITY_THRESHOLD"] = st.session_state.get('sim_threshold', 0.85)
+                config["COOCCURRENCE_WEIGHT"] = st.session_state.get('cooc_weight', 0.9)
+                config["SEMANTIC_WEIGHT"] = st.session_state.get('sem_weight', 0.1)
+                config["USE_INFERENCE"] = st.session_state.get('use_inference', True)
+                config["USE_CAUSAL_EXTRACTION"] = st.session_state.get('use_causal_extraction', True)
+                st.write(f"📊 Adaptive config: {config}")
+                progress_bar.progress(0.15)
+
+                # v3.0: Initialize rich ontology
+                st.write("📚 Building nanomaterials ontology...")
+                ontology = NanomaterialsOntology()
+                ontology.build_embeddings(embed_model)
+                st.success(f"✅ Ontology loaded: {len(ontology.concepts)} concepts, {len(ontology.synonym_to_canonical)} synonyms")
+                progress_bar.progress(0.20)
+
+                # v3.0: Initialize resolver with disambiguation
+                resolver = AdvancedConceptResolver(
+                    ontology, embed_model, 
+                    similarity_threshold=st.session_state.get('sim_threshold', 0.85)
+                )
+                extractor = EnhancedConceptExtractor(ontology, resolver)
+
+                # v3.0: Parallel extraction with relationships
+                st.write("🔍 Parallel extraction with cause-effect detection...")
+                n_workers = st.session_state.get('parallel_workers', 8)
+                all_concepts, all_metrics, all_relationships = extract_concepts_parallel(
+                    df_filtered, selected_text_cols, extractor, max_workers=n_workers
+                )
+                st.write(f"✅ Extracted raw concepts from {len(all_concepts)} documents")
+                st.write(f"✅ Found {len(all_relationships)} cause-effect relationships")
+                progress_bar.progress(0.35)
+
+                # v3.0: Global resolution
+                st.write("🚀 Performing global semantic resolution via BLAS...")
+                resolved_map = extractor.finalize_global_resolution()
+                for doc_idx in range(len(all_concepts)):
+                    all_concepts[doc_idx] = [resolved_map.get(c, c) for c in all_concepts[doc_idx]]
+                st.success(f"✅ Resolved {len(resolved_map)} unique phrases globally")
+                progress_bar.progress(0.45)
+
+                st.write("🧹 Filtering and normalizing concepts...")
+                valid_concepts, concept_to_id, id_to_concept, concept_abstract_map = normalize_and_filter_concepts(
+                    all_concepts, config, ontology
+                )
+                st.write(f"✅ **{len(valid_concepts)}** valid concepts retained")
+                progress_bar.progress(0.55)
+
+                if len(valid_concepts) < 5:
+                    st.error("Too few concepts extracted. Try lowering frequency thresholds.")
+                    return
+
+                # v3.0: Build reasoning-enhanced graph
+                st.write("🕸️ Building reasoning-enhanced concept graph...")
+                builder = ReasoningEnhancedGraphBuilder(ontology, extractor)
+                nx_graph = builder.build_graph(
+                    all_concepts, valid_concepts, concept_to_id,
+                    relationships=all_relationships,
+                    embed_model=embed_model, config=config
+                )
+
+                # Report edge statistics
+                edge_types = Counter(nx_graph[u][v].get('edge_type', 'unknown') for u, v in nx_graph.edges())
+                inferred_count = sum(1 for u, v in nx_graph.edges() if nx_graph[u][v].get('inferred', False))
+                st.write(f"✅ Graph: {len(valid_concepts)} nodes, {nx_graph.number_of_edges()} edges")
+                st.write(f"   - Co-occurrence: {edge_types.get('cooccurrence', 0)}")
+                st.write(f"   - Semantic: {edge_types.get('semantic', 0)}")
+                st.write(f"   - Hierarchical: {edge_types.get('hypernym', 0) + edge_types.get('hyponym', 0)}")
+                st.write(f"   - Causal: {edge_types.get('causes', 0) + edge_types.get('influences', 0)}")
+                st.write(f"   - Bridge (inferred): {edge_types.get('bridge', 0)}")
+                st.write(f"   - Total inferred: {inferred_count}")
+                progress_bar.progress(0.65)
+
+                try:
+                    d_prev_dict = dict(nx.all_pairs_shortest_path_length(nx_graph, cutoff=4))
+                except Exception:
+                    d_prev_dict = {}
+                pos_pairs, neg_pairs = sample_edges_for_training(nx_graph, valid_concepts, concept_to_id, config)
+
+                st.write("🧬 Generating node embeddings...")
+                try:
+                    embeddings = embed_model.encode(valid_concepts, show_progress_bar=False, batch_size=64)
+                    node_features = torch.tensor(embeddings, dtype=torch.float32)
+                except Exception:
+                    node_features = torch.randn(len(valid_concepts), 384)
+                st.write(f"✅ Node features: {node_features.shape}")
+                progress_bar.progress(0.75)
+
+                st.write("🤖 Training GraphSAGE...")
+                def training_progress(epoch, loss):
+                    progress = 0.75 + (epoch / 50) * 0.10
+                    progress_bar.progress(min(1.0, progress))
+                    if epoch % 10 == 0:
+                        status.write(f"📊 Epoch {epoch}/50 | Loss: {loss:.4f}")
+                gnn_model, final_emb, adj_indices, adj_values = train_gnn(
+                    node_features, nx_graph, concept_to_id, pos_pairs, neg_pairs, training_progress
+                )
+                st.success("✅ GNN training complete")
+                progress_bar.progress(0.90)
+
+                st.write("📈 Scoring research directions...")
+                concept_properties = {}
+                for concept in valid_concepts:
+                    doc_indices = concept_abstract_map.get(concept, [])
+                    values = []
+                    for idx in doc_indices:
+                        if idx < len(all_metrics):
+                            for metric_values in all_metrics[idx].values():
+                                values.extend(metric_values)
+                    concept_properties[concept] = np.median(values) if values else 0.0
+                X_feat, y_target = [], []
+                for u, v in nx_graph.edges():
+                    pu, pv = concept_properties.get(u, 0), concept_properties.get(v, 0)
+                    w = nx_graph[u][v].get('weight', 1)
+                    X_feat.append([pu, pv, w])
+                    y_target.append(max(pu, pv) * 1.08 if max(pu, pv) > 0 else 0)
+                ridge = None
+                if len(X_feat) > 5:
+                    ridge = Ridge(alpha=1.0).fit(np.array(X_feat), np.array(y_target))
+                top_scores = compute_research_direction_scores(
+                    gnn_model, node_features, final_emb, nx_graph, valid_concepts,
+                    concept_properties, ridge, embed_model
+                )
+                st.write(f"✅ Scored {len(top_scores)} novel pairs")
+                progress_bar.progress(0.95)
+
+                st.write("🔬 Computing distillation metrics...")
+                distill_df = compute_concept_distillation(valid_concepts, concept_abstract_map, all_texts)
+                st.success("✅ Analysis complete!")
+                progress_bar.progress(1.00)
+                status.update(label="✅ Analysis complete!", state="complete", expanded=False)
+
+                st.session_state.analysis_data = {
+                    "valid_concepts": valid_concepts,
+                    "concept_to_id": concept_to_id,
+                    "id_to_concept": id_to_concept,
+                    "concept_abstract_map": concept_abstract_map,
+                    "nx_graph": nx_graph,
+                    "concept_properties": concept_properties,
+                    "ridge": ridge,
+                    "top_scores": top_scores,
+                    "distill_df": distill_df,
+                    "gnn_model": gnn_model,
+                    "final_emb": final_emb,
+                    "embed_model": embed_model,
+                    "all_metrics": all_metrics,
+                    "all_texts": all_texts,
+                    "config": config,
+                    # v3.0: Store reasoning objects
+                    "ontology": ontology,
+                    "builder": builder,
+                    "relationships": all_relationships,
+                    "df": df_filtered
+                }
+        except Exception as e:
+            st.error(f"❌ Pipeline Error: {e}")
+            with st.expander("🔍 Traceback"):
+                st.code(traceback.format_exc())
+            return
+        finally:
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+    # ─── DISPLAY RESULTS ───
+    if st.session_state.analysis_data is not None:
+        data = st.session_state.analysis_data
+        valid_concepts = data["valid_concepts"]
+        concept_abstract_map = data["concept_abstract_map"]
+        nx_graph = data["nx_graph"]
+        top_scores = data["top_scores"]
+        distill_df = data["distill_df"]
+        cmap = st.session_state.get('cmap_name', 'viridis')
+        top_n_graph = st.session_state.get('top_n_graph', 200)
+
+        # v3.0: Get reasoning objects
+        ontology = data.get("ontology")
+        builder = data.get("builder")
+        df = data.get("df")
+
+        # v3.0: Extended tabs with Reasoning Dashboard and Extra Analytics
+        viz_tab, distill_tab, scores_tab, valid_tab, reasoning_tab, extra_tab, export_tab = st.tabs([
+            "🎨 Visualization", "📊 Distillation", "🎯 Research Directions", 
+            "📐 Validation", "🧠 Reasoning Dashboard", "📈 Extra Analytics", "📥 Export"
+        ])
+
+        with viz_tab:
+            st.subheader("🌐 Interactive Concept Graph")
+            if nx_graph.number_of_nodes() == 0:
+                st.warning("No nodes to display.")
+            elif nx_graph.number_of_edges() == 0:
+                st.warning("No edges — building semantic fallback")
+                nx_graph = nx.complete_graph(len(valid_concepts))
+                nx_graph = nx.relabel_nodes(nx_graph, {i: valid_concepts[i] for i in range(len(valid_concepts))})
+
+            viz_choice = st.session_state.get('viz_backend', 'PyVis (Interactive)')
+            layout_mode = st.session_state.get("layout_mode", "force-directed")
+            physics = st.session_state.get('physics_enabled', True)
+            physics_preset = st.session_state.get('effective_physics', PHYSICS_PRESETS["Stable (Default)"])
+            theme = THEME_PRESETS.get(st.session_state.get('theme', 'Bright (Default)'), THEME_PRESETS["Bright (Default)"])
+
+            top_n = st.session_state.get('top_n_graph', 0)
+
+            # v3.0: Get visualization options
+            use_abbreviated = st.session_state.get('use_abbreviated_labels', False)
+            max_label_len = st.session_state.get('max_label_length', 15)
+            edge_label_mode = st.session_state.get('edge_label_mode', 'hover')
+
+            if viz_choice == "PyVis (Interactive)":
+                render_graph_pyvis(
+                    nx_graph, concept_abstract_map, physics_enabled=physics,
+                    cmap_name=cmap, top_n_nodes=top_n,
+                    theme=theme, physics_preset=physics_preset,
+                    use_abbreviated_labels=use_abbreviated,
+                    max_label_length=max_label_len,
+                    edge_label_mode=edge_label_mode
+                , layout_mode=layout_mode)
+            elif viz_choice == "Plotly 2D":
+                render_graph_plotly_2d(nx_graph, concept_abstract_map, cmap_name=cmap, top_n_nodes=top_n,
+                                       theme=theme)
+            elif viz_choice == "Plotly 3D":
+                render_graph_plotly_3d(nx_graph, concept_abstract_map, cmap_name=cmap, top_n_nodes=top_n,
+                                        theme=theme)
+            else:
+                render_graph_fallback(nx_graph, concept_abstract_map, theme=theme)
+
+            with st.expander("📊 Graph Metrics"):
+                metrics = compute_graph_metrics(nx_graph)
+                display_metric_dashboard(metrics, theme=theme)
+
+            with st.expander("📈 Domain Hierarchy (Symbol Sunburst)"):
+                labels, parents, values = build_category_hierarchy(valid_concepts, concept_abstract_map,
+                                                                    top_n_per_category=st.session_state.get('top_n_sunburst', 0))
+                use_symbols = st.session_state.get('use_symbol_sunburst', True)
+                render_sunburst_chart(labels, parents, values, cmap_name=cmap, theme=theme,
+                                      use_symbols=use_symbols)
+
+            with st.expander("📡 Concept Radar"):
+                radar_k = st.session_state.get('top_n_radar', 15)
+                if radar_k == 0:
+                    radar_k = min(15, len(distill_df))
+                render_radar_chart(distill_df, top_k=radar_k, cmap_name=cmap, theme=theme)
+
+        with distill_tab:
+            st.subheader("🔍 Concept Distillation Efficiency")
+            top_n = st.slider("Show Top N", 10, min(200, len(distill_df)), 50, key="distill_top_n")
+            display_df = distill_df.head(top_n)
+            st.dataframe(display_df, use_container_width=True)
+            st.markdown("**📈 Efficiency vs Frequency:**")
+            chart_df = display_df.set_index('concept')[['distillation_efficiency']]
+            st.bar_chart(chart_df)
+            st.markdown("**📊 Multi-Metric Comparison:**")
+            metric_cols = [c for c in ['frequency', 'tfidf_weight', 'semantic_density', 'coherence_score']
+                           if c in display_df.columns]
+            if metric_cols:
+                compare_df = display_df[['concept'] + metric_cols].set_index('concept')
+                st.line_chart(compare_df)
+
+        with scores_tab:
+            st.subheader("🎯 Top Research Direction Recommendations")
+            if top_scores.empty:
+                st.info("No novel pairs scored. The graph may be too dense or too sparse.")
+            else:
+                st.write(f"Top {len(top_scores)} novel concept pairs:")
+                st.dataframe(top_scores[['concept_u', 'concept_v', 'composite_score',
+                                         'gnn_affinity', 'semantic_novelty',
+                                         'expected_property_gain', 'feasibility_score']].head(20),
+                            use_container_width=True)
+                csv_scores = top_scores.to_csv(index=False).encode('utf-8')
+                st.download_button("📥 Download Scores (CSV)", data=csv_scores,
+                                  file_name="research_directions_v3.csv", mime="text/csv")
+
+        with valid_tab:
+            st.subheader("📐 Mathematical Validation")
+            val_metrics = validate_graph_metrics(nx_graph, valid_concepts)
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Modularity", f"{val_metrics.get('modularity', 0):.3f}")
+            col2.metric("Silhouette", f"{val_metrics.get('silhouette_score', 0):.3f}")
+            col3.metric("Communities", val_metrics.get('n_communities', 0))
+            col4.metric("Significant Edges", val_metrics.get('edge_significant_count', 0))
+
+            # v3.0: Edge type distribution
+            if "edge_type_distribution" in val_metrics:
+                st.markdown("**🔗 Edge Type Distribution:**")
+                edge_type_df = pd.DataFrame([
+                    {"Type": k, "Count": v} 
+                    for k, v in val_metrics["edge_type_distribution"].items()
+                ])
+                st.dataframe(edge_type_df, use_container_width=True)
+
+            if "inferred_edges_count" in val_metrics:
+                col1, col2 = st.columns(2)
+                col1.metric("Inferred Edges", val_metrics["inferred_edges_count"])
+                col2.metric("Observed Edges", val_metrics["observed_edges_count"])
+
+            if not top_scores.empty:
+                n_boot = st.session_state.get('bootstrap_samples', 500)
+                alpha = st.session_state.get('alpha_level', 0.05)
+                mean_score, ci_low, ci_high = compute_bootstrap_ci(
+                    top_scores['composite_score'].values, n_bootstrap=n_boot, alpha=alpha
+                )
+                st.success(f"🎯 Composite Score: `{mean_score:.3f}` | {int((1-alpha)*100)}% CI: `[{ci_low:.3f}, {ci_high:.3f}]`")
+            X_feat, y_target = [], []
+            for u, v in nx_graph.edges():
+                pu, pv = data["concept_properties"].get(u, 0), data["concept_properties"].get(v, 0)
+                w = nx_graph[u][v].get('weight', 1)
+                X_feat.append([pu, pv, w])
+                y_target.append(max(pu, pv) * 1.08 if max(pu, pv) > 0 else 0)
+            if data["ridge"] is not None and len(X_feat) > 5:
+                y_pred = data["ridge"].predict(np.array(X_feat))
+                st.markdown("### 🔬 Ridge Regression (Property Prediction)")
+                c1, c2, c3 = st.columns(3)
+                c1.metric("R²", f"{r2_score(y_target, y_pred):.3f}")
+                c2.metric("MAE", f"{mean_absolute_error(y_target, y_pred):.2f}")
+                c3.metric("RMSE", f"{np.sqrt(mean_squared_error(y_target, y_pred)):.2f}")
+
+        # v3.0: REASONING DASHBOARD TAB
+        with reasoning_tab:
+            if ontology and builder:
+                render_reasoning_dashboard(nx_graph, valid_concepts, ontology, builder)
+            else:
+                st.info("Reasoning dashboard requires ontology data. Re-run analysis with reasoning enabled.")
+
+        # v3.0: EXTRA ANALYTICS TAB
+        with extra_tab:
+            st.subheader("📈 Advanced Analytics Suite")
+
+            # t-SNE Projection
+            with st.expander("🎯 t-SNE Semantic Projection", expanded=True):
+                st.markdown("**2D t-SNE projection of concept embeddings**")
+                embed_model = data.get("embed_model")
+                if embed_model:
+                    render_tsne_projection(valid_concepts, concept_abstract_map, embed_model, cmap)
+
+            # Keyword Burst Detection
+            with st.expander("🔥 Keyword Burst Detection"):
+                if df is not None and "Year" in df.columns:
+                    burst_df = detect_keyword_bursts(df, valid_concepts, concept_abstract_map)
+                    render_burst_chart(burst_df, top_k=20)
+                else:
+                    st.info("Temporal burst detection requires 'Year' column in data.")
+
+            # Co-occurrence Heatmap
+            with st.expander("🔥 Co-occurrence Heatmap"):
+                render_cooccurrence_heatmap(nx_graph, valid_concepts, top_n=30)
+
+            # Network Motif Analysis
+            with st.expander("🕸️ Network Motif Analysis"):
+                render_motif_analysis(nx_graph)
+
+            # Temporal Trends
+            with st.expander("📈 Temporal Trends"):
+                if df is not None and "Year" in df.columns:
+                    render_temporal_trends(df, valid_concepts, concept_abstract_map, top_k=10)
+                else:
+                    st.info("Temporal trends require 'Year' column in data.")
+
+            # Semantic Drift
+            with st.expander("🌊 Semantic Drift Detection"):
+                if df is not None and "Year" in df.columns and embed_model:
+                    with st.spinner("Analyzing semantic drift..."):
+                        drift_df = detect_semantic_drift(df, valid_concepts, concept_abstract_map, embed_model)
+                        if not drift_df.empty:
+                            st.markdown("**Concepts with significant semantic drift over time:**")
+                            st.dataframe(drift_df, use_container_width=True)
+                            fig = px.bar(
+                                drift_df.head(15), 
+                                x='drift_score', 
+                                y='concept',
+                                orientation='h',
+                                title="Semantic Drift Scores (Higher = More Drift)",
+                                labels={'drift_score': 'Drift Score', 'concept': 'Concept'}
+                            )
+                            st.plotly_chart(fig, use_container_width=True)
+                        else:
+                            st.info("No significant semantic drift detected.")
+                else:
+                    st.info("Semantic drift detection requires 'Year' column and embedding model.")
+
+        with export_tab:
+            st.subheader("📥 Export & Post-Processing")
+            export_format = st.selectbox("Format:", ["GraphML", "JSON", "CSV (Edges)", "CSV (Nodes)", "PNG"])
+            if st.button("📤 Generate Export"):
+                result = export_graph(nx_graph, concept_abstract_map, export_format)
+                if result[0]:
+                    data_bytes, mime, filename = result
+                    st.download_button("💾 Save File", data=data_bytes, file_name=filename, mime=mime)
+            concept_list_df = pd.DataFrame({
+                'concept': valid_concepts,
+                'frequency': [len(concept_abstract_map.get(c, [])) for c in valid_concepts],
+                'degree': [nx_graph.degree(c) for c in valid_concepts],
+                'category': [abstract_concepts_to_categories([c]).get(c, 'general') for c in valid_concepts],
+                'concept_type': [nx_graph.nodes[c].get('concept_type', 'general') for c in valid_concepts]
+            })
+            csv_concepts = concept_list_df.to_csv(index=False).encode('utf-8')
+            st.download_button("📄 Download Concept List (CSV)", data=csv_concepts,
+                              file_name="concepts_v3.csv", mime="text/csv")
+
+            # v3.0: Export relationships
+            if "relationships" in data and data["relationships"]:
+                rel_df = pd.DataFrame([r.to_dict() for r in data["relationships"]])
+                csv_rels = rel_df.to_csv(index=False).encode('utf-8')
+                st.download_button("🔗 Download Relationships (CSV)", data=csv_rels,
+                                  file_name="relationships_v3.csv", mime="text/csv")
 
 if __name__ == "__main__":
     main()
