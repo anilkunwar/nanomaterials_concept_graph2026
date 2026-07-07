@@ -2235,7 +2235,7 @@ def render_sunburst_chart(labels, parents, values, cmap_name="viridis",
             ("▲", "Specific Concept"),
             ("◆", "Detailed Term")
         ]
-        for i, (sym, meaning) in enumerate(legend_meanings):
+        for i, (sym, meaning) in enumerate(symbol_meanings):
             with legend_cols[i % 6]:
                 st.markdown(f"**{sym}** = {meaning}")
 
