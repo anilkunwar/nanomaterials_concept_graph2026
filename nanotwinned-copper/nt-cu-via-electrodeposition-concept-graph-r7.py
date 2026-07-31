@@ -3611,17 +3611,12 @@ def render_pyvis_graph(
 
         # FIX 1: Ensure the tooltip ALWAYS starts with the exact canonical node name on its own line
         tooltip_content = (
-            f"{node}
-"
-            f"Type: {concept_type}
-"
-            f"Degree: {degree}
-"
+            f"{node}" + "\n" +
+            f"Type: {concept_type}" + "\n" +
+            f"Degree: {degree}" + "\n" +
             f"Frequency: {freq}"
-            + (f"
-Definition: {_def_display}" if _def_display else "")
-            + (f"
-Full Label: {_full_label_display}" if _full_label_display else "")
+            + (("\nDefinition: " + _def_display) if _def_display else "")
+            + (("\nFull Label: " + _full_label_display) if _full_label_display else "")
         )
 
         net.add_node(node, label=label, size=size,
