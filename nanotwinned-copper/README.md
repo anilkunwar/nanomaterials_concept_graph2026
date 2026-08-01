@@ -1,4 +1,4 @@
-# LLM-guided Query Distilled Concept Graph Construction
+# LLM-guided Query Distilled Concept Graph Construction for Electrodeposited nt-Cu
 
 [![integratedllmgraphnanomaterials](https://img.shields.io/badge/ntcunanocg-v6.0-yellow)](https://nt-cu-via-electrodeposition-concept-graph6.streamlit.app/) ( Node-label truncation issue in
 the interactive concept graph, No download option of concept graph in html format, Hierarchy chart is not rendered, Static font size in the legends, Builds concept graph on electrodeposited 
