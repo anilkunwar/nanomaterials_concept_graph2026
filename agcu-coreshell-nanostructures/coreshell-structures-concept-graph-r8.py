@@ -1,3 +1,15 @@
+Below is the **fully upgraded code** with all the OOM fixes applied. The changes are:
+
+1. `LocalLLMQueryAnalyzer.unload_model()` – explicitly deletes the pipeline and frees GPU memory.  
+2. `render_llm_query_panel()` – calls `unload_model()` **immediately** after analysis, before returning.  
+3. `render_llm_qa_tab()` – calls `unload_model()` after answer generation.  
+4. `run_batch_analysis()` – clears any cached LLMs from `st.session_state.qa_factory` at the very start.  
+5. `_process_one_batch()` – passes `allowed_concepts=whitelist` to the extractor and clears `all_concepts`/`all_metrics` after merging.  
+6. `_finalize()` – clears batch accumulators after building the final `analysis_data`.
+
+The entire code is provided as a single, runnable script. Copy it into a file named `cuag_concept_graph_v6.2_llm.py` and run with `streamlit run cuag_concept_graph_v6.2_llm.py`.
+
+```python
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
@@ -38,6 +50,12 @@ Streamlit Cloud 1 GB limit by batch ~2. v6.1 caps every one of them:
   coherence computed on the first 20 words only, dict-or-list `all_texts`
   compatible, explicit del/gc cleanup.
 Expected peak RSS after the patches: ~400 MB total (vs. > 1 GB before).
+
+v6.2 — LLM‑Guided Query & Ontology Expansion, plus OOM fixes for query‑focused builds:
+- Local LLM models are unloaded immediately after query analysis to prevent
+  memory accumulation with embedding model.
+- Batch processing respects the query whitelist, reducing extracted concepts.
+- Accumulators are cleared per batch and at finalization to keep memory flat.
 
 DOMAIN: Cu@Ag Core-Shell Nanoparticles
 - Materials: Cu@Ag core-shell, Cu core, Ag shell, core-shell interface
@@ -5279,6 +5297,17 @@ def run_batch_analysis(
     run_mode: str = "all",
 ) -> None:
     overall_start = time.perf_counter()
+    # ★ SAFETY NET: Force-clear any cached LLMs before batch graph building ★
+    if 'qa_factory' in st.session_state:
+        factory = st.session_state.qa_factory
+        for analyzer in factory._local_cache.values():
+            if hasattr(analyzer, 'unload_model'):
+                analyzer.unload_model()
+        factory._local_cache.clear()
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
     try:
         torch.set_num_threads(2)
     except Exception:
@@ -5383,6 +5412,8 @@ def run_batch_analysis(
         batch_metrics: List[Dict] = []
         batch_doc_freq: Dict[str, int] = defaultdict(int)
         extractor = bs["extractor"]
+        # Get whitelist for query-focused build if active
+        whitelist = st.session_state.get('last_query_whitelist', None)
 
         for local_i, (_, row) in enumerate(batch_df.iterrows()):
             text = " ".join([
@@ -5390,7 +5421,10 @@ def run_batch_analysis(
                 if col in row and pd.notna(row[col])
             ])
             if use_ontology and extractor is not None:
-                concepts = extractor.extract_from_text(text, start + local_i)
+                concepts = extractor.extract_from_text(
+                    text, start + local_i,
+                    allowed_concepts=whitelist   # ★ PASS WHITELIST ★
+                )
             else:
                 concepts = extract_concepts_from_text(text)
             batch_concepts.append(concepts)
@@ -5452,6 +5486,10 @@ def run_batch_analysis(
             bs["merged_graph"] = merge_graphs(bs["merged_graph"], batch_graph)
         recompute_edge_weights(bs["merged_graph"], config)
         bs["next_batch"] = batch_num + 1
+
+        # ★ CLEAR PER-BATCH DATA AFTER MERGE ★
+        bs["all_concepts"] = []    # clear to prevent unbounded growth
+        bs["all_metrics"] = []     # clear metrics
 
         g = bs["merged_graph"]
         with status:
@@ -5647,7 +5685,9 @@ def run_batch_analysis(
             merged, valid_concepts, concept_to_id,
             id_to_concept, concept_abstract_map,
         )
+        # ★ CLEAR BATCH ACCUMULATORS AFTER FINALIZATION ★
         bs["all_concepts"] = []
+        bs["all_metrics"] = []
         bs["valid_doc_indices"] = set()
         gc.collect()
         if torch.cuda.is_available():
@@ -6618,6 +6658,22 @@ class LocalLLMQueryAnalyzer(LLMQueryAnalyzer):
                 torch.cuda.empty_cache()
         return FallbackAnalyzer().analyze_query(query, ontology)
 
+    # ★ NEW: unload_model to free memory ★
+    def unload_model(self) -> None:
+        """Explicitly free the LLM model and pipeline from memory."""
+        if self._pipeline is not None:
+            # Delete tokenizer and model explicitly
+            if hasattr(self._pipeline, 'tokenizer'):
+                del self._pipeline.tokenizer
+            if hasattr(self._pipeline, 'model'):
+                del self._pipeline.model
+            del self._pipeline
+            self._pipeline = None
+        self._loaded = False
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
 class LLMQueryAnalyzerFactory:
     def __init__(self):
         self._openai_cache: Optional[OpenAIQueryAnalyzer] = None
@@ -7068,6 +7124,12 @@ def render_llm_query_panel(ontology: Any, expander: DynamicOntologyExpander, ful
     with st.sidebar.spinner("Expanding ontology..."):
         mutations = expander.apply_query_analysis(analysis, analyzer)
 
+    # ★ UNLOAD THE HEAVY LLM ★
+    if hasattr(analyzer, 'unload_model'):
+        analyzer.unload_model()
+    del analyzer
+    gc.collect()
+
     whitelist = set(analysis.explicitly_mentioned)
     whitelist.update(analysis.inferred_concepts)
     whitelist.update(expander.session_concepts_added)
@@ -7206,10 +7268,15 @@ def render_llm_qa_tab(analysis_data: Dict, ontology: Any):
                 all_texts=analysis_data.get("all_texts", []),
                 max_docs_per_concept=2
             )
+
+        # ★ UNLOAD THE LLM AFTER ANSWER GENERATION ★
+        if hasattr(analyzer, 'unload_model'):
+            analyzer.unload_model()
+        del analyzer
+        gc.collect()
             
         st.markdown("### 💡 Generated Answer")
         st.markdown(answer)
-        st.markdown("---")
         st.markdown("---")
         st.markdown("### 🕸️ Focused Subgraph Visualization")
         with st.expander("⚙️ Subgraph Physics Settings (Prevent Jiggling)", expanded=False):
@@ -8316,3 +8383,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+```
