@@ -1,15 +1,3 @@
-Below is the **fully upgraded code** with all the OOM fixes applied. The changes are:
-
-1. `LocalLLMQueryAnalyzer.unload_model()` – explicitly deletes the pipeline and frees GPU memory.  
-2. `render_llm_query_panel()` – calls `unload_model()` **immediately** after analysis, before returning.  
-3. `render_llm_qa_tab()` – calls `unload_model()` after answer generation.  
-4. `run_batch_analysis()` – clears any cached LLMs from `st.session_state.qa_factory` at the very start.  
-5. `_process_one_batch()` – passes `allowed_concepts=whitelist` to the extractor and clears `all_concepts`/`all_metrics` after merging.  
-6. `_finalize()` – clears batch accumulators after building the final `analysis_data`.
-
-The entire code is provided as a single, runnable script. Copy it into a file named `cuag_concept_graph_v6.2_llm.py` and run with `streamlit run cuag_concept_graph_v6.2_llm.py`.
-
-```python
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
@@ -8383,4 +8371,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-```
+
