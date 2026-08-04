@@ -606,7 +606,7 @@ def add_graph_nodes_to_pyvis(
     color_map: Optional[Dict[str, str]] = None,
     size_range: Tuple[int, int] = (15, 50),
     concept_type_colors: Optional[Dict[ConceptType, str]] = None,
-    ontology: Optional[DomainOntology] = None,
+    ontology: Optional["DomainOntology"] = None,
 ) -> Network:
     """
     Add every node from *graph* to the pyvis *net* using the chosen
