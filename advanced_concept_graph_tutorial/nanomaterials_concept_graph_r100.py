@@ -655,8 +655,7 @@ def add_graph_nodes_to_pyvis(
             tip_parts.append(f"Type: {cn.concept_type.value}")
             if cn.definition:
                 tip_parts.append(cn.definition)
-        tooltip = "
-".join(tip_parts)
+        tooltip = "\n".join(tip_parts)
 
         ext_label = (
             external_label_text
