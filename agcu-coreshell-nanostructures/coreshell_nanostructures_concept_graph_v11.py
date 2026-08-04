@@ -1,11 +1,27 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-import os
+# import os
 # -------------------------------------------------------------------------
 # Hardware toggle: uncomment BOTH lines ONLY if you need to force CPU mode
 # -------------------------------------------------------------------------
 # os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 # os.environ["FORCE_CPU"] = "1"
+# These MUST be set before importing torch or streamlit
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+os.environ["FORCE_CPU"] = "1"
+
+# Inject a fake CUDA class to force PyTorch to completely ignore any GPUs
+class FakeCUDA:
+    def is_available(self):
+        return False
+    def empty_cache(self):
+        pass
+    def device_count(self):
+        return 0
+
+import torch
+torch.cuda = FakeCUDA()
+torch.cuda.is_available = lambda: False
 
 """
 Cu@Ag Core-Shell Nanoparticle Concept Graph v6.2-Ollama (Local Ollama Edition)
@@ -74,7 +90,7 @@ Place JSON/BibTeX/CSV files in ./json_metadatabase/ folder next to this script.
 # IMPORTS
 # ============================================================================
 import streamlit as st
-import torch
+#import torch
 #st.write("CUDA available:", torch.cuda.is_available())   # Should print False
 import torch.nn as nn
 import torch.nn.functional as F
