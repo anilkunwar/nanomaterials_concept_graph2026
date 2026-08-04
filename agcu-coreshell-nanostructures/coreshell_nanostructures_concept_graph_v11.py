@@ -7,6 +7,11 @@
 # os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 # os.environ["FORCE_CPU"] = "1"
 # These MUST be set before importing torch or streamlit
+# ============================================================================
+# FORCE CPU ONLY MODE (Prevents CUDA No Kernel Image Errors)
+# ============================================================================
+import os
+import sys
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 os.environ["FORCE_CPU"] = "1"
 
