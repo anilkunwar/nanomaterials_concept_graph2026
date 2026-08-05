@@ -12,21 +12,20 @@
 # ============================================================================
 import os
 import sys
+
+# ============================================================================
+# FORCE CPU ONLY MODE
+# ============================================================================
+# CUDA_VISIBLE_DEVICES=-1 is SUFFICIENT to force CPU mode.
+# Do NOT replace torch.cuda with a fake object — it breaks the import chain
+# for transformers/sentence_transformers which need torch.cuda._pin_memory_utils.
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 os.environ["FORCE_CPU"] = "1"
 
-# Inject a fake CUDA class to force PyTorch to completely ignore any GPUs
-class FakeCUDA:
-    def is_available(self):
-        return False
-    def empty_cache(self):
-        pass
-    def device_count(self):
-        return 0
-
 import torch
-torch.cuda = FakeCUDA()
-torch.cuda.is_available = lambda: False
+# torch.cuda.is_available() will return False automatically because
+# CUDA_VISIBLE_DEVICES=-1 hides all GPUs. No hack needed.
+#torch.cuda.is_available = lambda: False
 
 """
 Cu@Ag Core-Shell Nanoparticle Concept Graph v6.2-Ollama (Local Ollama Edition)
