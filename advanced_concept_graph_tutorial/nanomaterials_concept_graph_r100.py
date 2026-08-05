@@ -5667,10 +5667,17 @@ def run_batch_analysis(
         return
     total_batches = math.ceil(total_docs / batch_size)
 
+    # Robust hash: row count + columns + content fingerprint
+    content_fingerprint = ""
+    if len(df_filtered) > 0:
+        # Hash first/last row + shape to detect filtering changes
+        sample = pd.util.hash_pandas_object(df_filtered.head(2)._append(df_filtered.tail(2))).sum()
+        content_fingerprint = f"|{len(df_filtered)}|{sample}"
     data_hash = hashlib.md5(
         (
             f"{total_docs}|{'|'.join(selected_text_cols)}|"
             f"{df_filtered.index.min()}|{df_filtered.index.max()}"
+            f"{content_fingerprint}"
         ).encode("utf-8")
     ).hexdigest()
 
@@ -5705,6 +5712,25 @@ def run_batch_analysis(
 
     if bs["done"]:
         st.success("✅ All batches already processed — see results below.")
+        return
+
+    # ═══════════════════════════════════════════════════════
+    # ZOMBIE STATE RECOVERY
+    # If all batches were read but _finalize() crashed/timed
+    # out previously, bs["done"] is False and pending is [].
+    # We attempt to re-run finalization from the merged graph.
+    # ═══════════════════════════════════════════════════════
+    if bs["next_batch"] >= total_batches and not bs.get("done"):
+        st.warning("⚠️ Detected incomplete finalization (zombie state). Recovering...")
+        try:
+            _finalize()
+            st.success("✅ Recovery successful! Graph built from existing batch data.")
+            st.balloons()
+        except Exception as e:
+            st.error(f"❌ Recovery failed: {e}")
+            with st.expander("Traceback"):
+                st.code(traceback.format_exc())
+            st.info("Click 🗑️ Reset batch state in the sidebar and rebuild with lower memory settings (Batch size: 500, GNN epochs: 20).")
         return
 
     config = get_adaptive_config(total_docs)
@@ -5844,10 +5870,13 @@ def run_batch_analysis(
             torch.cuda.empty_cache()
 
     def _finalize() -> None:
-        merged = bs["merged_graph"]
-        if merged is None or merged.number_of_nodes() == 0:
-            st.error("No graph could be built from the processed batches.")
-            return
+        """Finalize with error trapping to avoid zombie states."""
+        try:
+            merged = bs["merged_graph"]
+            if merged is None or merged.number_of_nodes() == 0:
+                st.error("No graph could be built from the processed batches.")
+                bs["finalize_error"] = "Empty graph"
+                return
         min_freq = config.get("MIN_CONCEPT_FREQ", 2)
         top_n = config.get("TOP_N_CONCEPTS", 1000)
         with status:
@@ -5865,6 +5894,7 @@ def run_batch_analysis(
                 "Too few concepts extracted. "
                 "Try lowering frequency thresholds."
             )
+            bs["finalize_error"] = "Too few concepts"
             return
         valid_set = set(valid_concepts)
         drop_nodes = [n for n in merged.nodes() if n not in valid_set]
@@ -6030,6 +6060,11 @@ def run_batch_analysis(
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         bs["done"] = True
+        bs.pop("finalize_error", None)
+
+    except Exception as e:
+        bs["finalize_error"] = str(e)
+        raise
 
     try:
         for b in pending:
