@@ -22,3 +22,6 @@ Local Computers based Run using OLLLAMA RUN (the link are still not working)
 [![integratedllmgraphnanomaterials](https://img.shields.io/badge/coreshellnanocg-v5.12-violet)](https://coreshell-structures-concept-graph12.streamlit.app/) ( Problem identified in r10 and r11: The pipeline crashed locally during GNN training due to a PyTorch device mismatch (CPU vs. GPU tensors) and a decoder dimension error triggered when small graphs produced zero negative edge samples.
 Solution incorporated in r12: Hardcoded the GraphSAGE training device to CPU to ensure local/Cloud parity and added safe fallbacks to gracefully handle empty neg_pairs without crashing the tensor decoder.)
 
+[![integratedllmgraphnanomaterials](https://img.shields.io/badge/coreshellnanocg-v5.13-violet)](https://coreshell-structures-concept-graph12.streamlit.app/) ( Visualization customization in v12 for pyvis nodes, Problem identified in r10 and r11: The pipeline crashed locally during GNN training due to a PyTorch device mismatch (CPU vs. GPU tensors) and a decoder dimension error triggered when small graphs produced zero negative edge samples.
+Solution incorporated in r12: Hardcoded the GraphSAGE training device to CPU to ensure local/Cloud parity and added safe fallbacks to gracefully handle empty neg_pairs without crashing the tensor decoder.)
+
