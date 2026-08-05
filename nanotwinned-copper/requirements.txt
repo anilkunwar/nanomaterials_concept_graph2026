@@ -1,5 +1,5 @@
 streamlit
-starlette<0.40.0
+starlette<0.40.0  # use older version of starlette
 #matplotlib<3.9.0
 matplotlib
 scipy
