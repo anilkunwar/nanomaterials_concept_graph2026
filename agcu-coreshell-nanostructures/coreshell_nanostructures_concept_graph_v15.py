@@ -6192,7 +6192,6 @@ def render_sidebar() -> None:
                     "Prefix (optional)", value="N", key="annot_prefix",
                     help="Use 'N' for N1, N2 … or 'C' for C1, C2 … or any prefix you like.",
                 )
-                st.session_state['annot_prefix'] = _annot_prefix or "N"
                 st.session_state['node_label_position'] = "center"
 
             # ─── Mode 3: Custom Blank ────────────────────────────────────
