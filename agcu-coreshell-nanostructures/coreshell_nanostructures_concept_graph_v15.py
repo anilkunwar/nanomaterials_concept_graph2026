@@ -442,10 +442,9 @@ class ConceptType(Enum):
 # ============================================================================
 
 class NodeLabelMode(Enum):
-    FULL_NAME = "full_name"           # Full name inside node
-    SHORT_NAME = "short_name"         # Abbreviated name inside node
-    NO_NAME = "no_name"               # Blank space (no label) inside node
-    EXTERNAL_LABEL = "external_label" # Blank inside, custom label outside node
+    FULL_NAME    = "full_name"      # Full concept name inside node
+    ANNOTATION   = "annotation"     # N1, N2, … inside node + legend below
+    CUSTOM_BLANK = "custom_blank"   # User-typed text inside node (or truly blank)
 
 # Hand-curated abbreviation map for Cu@Ag ontology
 _SHORT_NAME_MAP: Dict[str, str] = {
@@ -486,10 +485,9 @@ def get_short_name(canonical_name: str) -> str:
 
 # Single source of truth for label mode dropdown
 LABEL_MODE_OPTIONS = {
-    "Full name (inside node)":           NodeLabelMode.FULL_NAME,
-    "Short / abbreviated (inside node)": NodeLabelMode.SHORT_NAME,
-    "Blank — no label (inside node)":    NodeLabelMode.NO_NAME,
-    "Blank inside, label outside node":  NodeLabelMode.EXTERNAL_LABEL,
+    "1. Full Name (concept name inside)":       NodeLabelMode.FULL_NAME,
+    "2. Annotations N1, N2… (inside + legend)": NodeLabelMode.ANNOTATION,
+    "3. Custom Blank (type your own text)":     NodeLabelMode.CUSTOM_BLANK,
 }
 
 
@@ -3446,52 +3444,72 @@ def render_pyvis_graph(
         degree = int(nx_graph.degree(node))
         
         original_label = node
-        # ============ LABEL ENGINE v3 ============
+        # ============ LABEL ENGINE v4 — 3 clean modes ============
         _custom_map = st.session_state.get('custom_label_map', {}) or {}
-        
-        # STEP 1 — text source (mode = master switch)
-        if label_mode == NodeLabelMode.SHORT_NAME:
-            label = get_short_name(node)
-        elif label_mode == NodeLabelMode.NO_NAME:
-            label = ""
-        elif label_mode == NodeLabelMode.EXTERNAL_LABEL:
-            label = (_custom_map.get(node)
-                     or external_label_text
-                     or (get_hierarchy_label(node, "arrow")
-                         if node in _HIERARCHY_PARENTS
-                         else node.replace("_", " ").title()))
-        else:
-            label = (get_hierarchy_label(node, "arrow")
-                     if node in _HIERARCHY_PARENTS
-                     else node.replace("_", " ").title())
-        
-        # STEP 2 — N# abbreviation: INSIDE modes only, only if still long
-        if (use_abbreviated_labels
-                and label_mode in (NodeLabelMode.FULL_NAME, NodeLabelMode.SHORT_NAME)
-                and len(label) > max_label_length):
-            label = f"N{n_counter}"
+
+        # The full human-readable name (used in tooltip + legend regardless of mode)
+        full_display = (get_hierarchy_label(node, "arrow")
+                        if node in _HIERARCHY_PARENTS
+                        else node.replace("_", " ").title())
+
+        if label_mode == NodeLabelMode.FULL_NAME:
+            # MODE 1: just the full concept name
+            label = full_display
+
+        elif label_mode == NodeLabelMode.ANNOTATION:
+            # MODE 2: N1, N2, … for every node, legend maps N# → full name
+            _prefix = st.session_state.get('annot_prefix', 'N') or 'N'
+            label = f"{_prefix}{n_counter}"
             label_map[label] = original_label
             n_counter += 1
-        
+
+        elif label_mode == NodeLabelMode.CUSTOM_BLANK:
+            # MODE 3: blank inside UNLESS user typed something for this node
+            # Priority: per-node override > common text for all > blank
+            _user_text = (_custom_map.get(node)       # per-node override
+                          or external_label_text      # common text for ALL nodes
+                          or "")                      # default empty
+
+            # Vis.js quirk: if label is "", it displays the node ID.
+            # Passing a single space " " guarantees a truly blank node.
+            label = _user_text if _user_text.strip() else " "
+
         node_shape = 'circle'
-        
-        # STEP 3 — MODE GATE: font chosen ONLY by mode
-        if label_mode == NodeLabelMode.NO_NAME:
-            font_dict = {'size': 0, 'color': 'rgba(0,0,0,0)',
-                         'face': node_font_face, 'strokeWidth': 0}
-        elif label_mode == NodeLabelMode.EXTERNAL_LABEL:
-            font_dict = {'color': external_font_color,
-                         'size': max(8, min(int(external_font_size), 60)),
-                         'face': node_font_face,
-                         'align': external_label_align,
-                         'vadjust': 0, 'strokeWidth': 0}
-        else:
-            font_dict = {'color': '#ffffff',
-                         'size': max(8, min(int(node_label_size), 60)),
-                         'face': node_font_face, 'bold': True,
-                         'align': node_label_position, 'strokeWidth': 0}
-        
-        audit_rows.append((node, label, font_dict.get('size'), font_dict.get('align', 'center')))
+
+        # Font chosen by mode — each mode has its OWN clean control set
+        if label_mode == NodeLabelMode.FULL_NAME:
+            font_dict = {
+                'color': '#ffffff',
+                'size': max(8, min(int(node_label_size), 60)),
+                'face': node_font_face, 'bold': True,
+                'align': node_label_position, 'strokeWidth': 0,
+            }
+        elif label_mode == NodeLabelMode.ANNOTATION:
+            # Compact, bold, centered — annotations look best this way
+            font_dict = {
+                'color': '#ffffff',
+                'size': max(10, min(int(node_label_size), 60)),
+                'face': node_font_face, 'bold': True,
+                'align': 'center', 'strokeWidth': 0,
+            }
+        elif label_mode == NodeLabelMode.CUSTOM_BLANK:
+            # User controls everything; size 0 only if label is genuinely empty
+            _is_blank = (len(label.strip()) == 0)
+            font_dict = {
+                'color': 'rgba(0,0,0,0)' if _is_blank else external_font_color,
+                'size': 0 if _is_blank else max(8, min(int(external_font_size), 60)),
+                'face': node_font_face,
+                'bold': not _is_blank,
+                'align': external_label_align,
+                'strokeWidth': 0,
+                'vadjust': 0,
+                'multi': False,  # Prevents any markdown rendering of the space
+            }
+
+        audit_rows.append((node, label,
+                           font_dict.get('size'), font_dict.get('align', 'center')))
+        # =============== end LABEL ENGINE v4 ===============
+
         # STEP 4 — TOOLTIP (this block was missing → NameError)
         concept_type = nx_graph.nodes[node].get('concept_type', 'general')
         definition = nx_graph.nodes[node].get('definition', '')
@@ -3499,10 +3517,10 @@ def render_pyvis_graph(
         if show_definitions and definition:
             _def_display = definition[:180] + "..." if len(definition) > 180 else definition
         _full_label_display = ""
-        if use_abbreviated_labels and label != original_label:
-            _full_label_display = original_label
-        elif label_mode == NodeLabelMode.SHORT_NAME:
-            _full_label_display = original_label.replace("_", " ").title()
+        if label_mode == NodeLabelMode.ANNOTATION:
+            _full_label_display = full_display          # show real name in tooltip
+        elif label_mode == NodeLabelMode.CUSTOM_BLANK and not label.strip():
+            _full_label_display = full_display          # blank node → show name in tooltip
         tooltip_content = (
             f"{node}\n"
             f"Type: {concept_type}\n"
@@ -3829,9 +3847,9 @@ def render_pyvis_graph(
     except Exception as e:
         st.error(f"Download preparation failed: {e}")
 
-    if use_abbreviated_labels and label_map:
+    if label_mode == NodeLabelMode.ANNOTATION and label_map:
         st.markdown("---")
-        st.markdown("### 🗺️ Node Label Legend")
+        st.markdown("### 🗺️ Annotation Legend  (N# → Concept Name)")
         sorted_legend = sorted(label_map.items(), key=lambda x: int(x[0][1:]))
         cols = st.columns(4)
         for i, (short, full) in enumerate(sorted_legend):
@@ -6139,32 +6157,81 @@ def render_sidebar() -> None:
             ),
         )
         with st.expander("Node & Label Settings"):
-            st.markdown("##### 🏷️ Node Label Display  ·  engine v3")
+            st.markdown("##### 🏷️ Node Label Display  ·  engine v4")
             label_mode_choice = st.selectbox(
-                "Label mode", options=list(LABEL_MODE_OPTIONS.keys()), index=0,
+                "Label mode (pick ONE — three orthogonal options):",
+                options=list(LABEL_MODE_OPTIONS.keys()),
+                index=0,
                 key="pyvis_label_mode",
-                help="Master switch – overrides all other label settings.")
+                help=(
+                    "1) Full Name = full concept name inside each node.\n"
+                    "2) Annotations = N1, N2, … inside each node + legend table below the graph.\n"
+                    "3) Custom Blank = nodes are blank inside; you type the text you want."
+                ),
+            )
             st.session_state['label_mode'] = LABEL_MODE_OPTIONS[label_mode_choice]
 
-            if st.session_state['label_mode'] == NodeLabelMode.EXTERNAL_LABEL:
-                st.caption("Blank interior + text beside the node.")
-                c1, c2, c3 = st.columns(3)
+            # ─── Mode 1: Full Name ───────────────────────────────────────
+            if st.session_state['label_mode'] == NodeLabelMode.FULL_NAME:
+                st.caption("✏️ Full concept name will appear inside each node.")
+                st.session_state['node_label_size'] = st.slider(
+                    "Font size (px)", 8, 50, 25, step=1, key="full_label_font_size",
+                )
+                st.session_state['node_label_position'] = st.selectbox(
+                    "Label position inside node",
+                    ["center", "top", "bottom"], index=0,
+                )
+
+            # ─── Mode 2: Annotations N1, N2, … ───────────────────────────
+            elif st.session_state['label_mode'] == NodeLabelMode.ANNOTATION:
+                st.caption("🔢 Each node becomes N1, N2, … A legend maps them to full names.")
+                st.session_state['node_label_size'] = st.slider(
+                    "Annotation font size (px)", 8, 40, 18, step=1, key="annot_font_size",
+                )
+                _annot_prefix = st.text_input(
+                    "Prefix (optional)", value="N", key="annot_prefix",
+                    help="Use 'N' for N1, N2 … or 'C' for C1, C2 … or any prefix you like.",
+                )
+                st.session_state['annot_prefix'] = _annot_prefix or "N"
+                st.session_state['node_label_position'] = "center"
+
+            # ─── Mode 3: Custom Blank ────────────────────────────────────
+            elif st.session_state['label_mode'] == NodeLabelMode.CUSTOM_BLANK:
+                st.caption("⬜ Nodes are blank inside. Type your own text below.")
+                c1, c2 = st.columns(2)
                 with c1:
                     st.session_state['external_font_size'] = st.slider(
-                        "Font size (px)", 8, 28, 14, 1, key="ext_label_font_size")
+                        "Font size (px)", 6, 60, 14, step=1, key="blank_font_size",
+                    )
                 with c2:
                     st.session_state['external_font_color'] = st.color_picker(
-                        "Font colour", "#333333", key="ext_label_font_color")
-                with c3:
-                    st.session_state['external_label_align'] = st.radio(
-                        "Label side", ["left", "right"], 0, horizontal=True, key="ext_label_align")
+                        "Font colour", "#1e293b", key="blank_font_color",
+                    )
+                st.session_state['external_label_align'] = st.radio(
+                    "Text alignment", ["center", "top", "bottom", "left", "right"],
+                    index=0, horizontal=True, key="blank_label_align",
+                )
                 st.session_state['external_label_text'] = st.text_input(
-                    "Common text for ALL nodes (optional)", "", key="ext_label_text_input",
-                    help="If filled, EVERY node shows this same string. Leave blank for per-node names.")
+                    "Common text for ALL nodes (optional)", "",
+                    key="blank_common_text",
+                    help=(
+                        "If you type something here (e.g. '•'), EVERY node shows that "
+                        "same string. Leave blank for truly empty nodes, OR use the "
+                        "per-node overrides below."
+                    ),
+                )
                 _custom = st.text_area(
-                    "Per-node overrides  (node_key = Label, one per line)",
-                    key="custom_label_text", height=90,
-                    placeholder="cu_core = Copper core\noxidation = Cu oxidation")
+                    "Per-node overrides  (node_key = Your Text, one per line)",
+                    key="custom_label_text", height=110,
+                    placeholder=(
+                        "cu_core = Cu\n"
+                        "ag_shell = Ag\n"
+                        "galvanic_replacement = GR\n"
+                        "shell_thickness = t\n"
+                        "plasmonic_property = LSPR"
+                    ),
+                    help="These override the common text on a per-node basis.",
+                )
                 _map = {}
                 for _ln in _custom.splitlines():
                     if "=" in _ln:
@@ -6172,20 +6239,13 @@ def render_sidebar() -> None:
                         if _k.strip() and _v.strip():
                             _map[_k.strip()] = _v.strip()
                 st.session_state['custom_label_map'] = _map
+                # Reuse the same slider key so downstream code stays compatible
+                st.session_state['node_label_size'] = st.session_state.get('external_font_size', 14)
+                st.session_state['node_label_position'] = st.session_state.get('external_label_align', 'left')
 
-
-            st.session_state['node_label_size'] = st.slider(
-                "Node label font size", 8, 50, 25, step=1,
-                help="Font size for node labels in the graph",
-            )
-            st.session_state['node_label_position'] = st.selectbox(
-                "Node label position",
-                ["center", "top", "bottom", "left", "right"],
-                index=0,
-                help="Where to place node labels relative to nodes",
-            )
+            # Shared font-family selector for all three modes
             st.session_state['node_font_face'] = st.selectbox(
-                "Node font family",
+                "Font family",
                 [
                     "Inter, Segoe UI, Roboto, sans-serif",
                     "Arial, Helvetica, sans-serif",
@@ -6197,22 +6257,15 @@ def render_sidebar() -> None:
             )
             st.slider(
                 "Node legend font size", 8, 50, 25, step=1,
-                help="Font size for the abbreviated node legend below the graph.",
+                help="Font size for the legend table below the graph.",
                 key="node_legend_font_size",
             )
-        st.session_state['use_abbreviated_labels'] = st.checkbox(
-            "Use short labels (N1, N2...) for long names",
-            value=False,
-            help="Replaces long node labels with N1, N2... and generates a legend below the graph.",
+        # N1/N2 is now a first-class label mode (see "Label mode" dropdown above).
+        # No separate checkbox needed.
+        st.session_state['use_abbreviated_labels'] = (
+            st.session_state.get('label_mode') == NodeLabelMode.ANNOTATION
         )
-        if st.session_state['use_abbreviated_labels']:
-            st.session_state['max_label_length'] = st.slider(
-                "Max label length before abbreviation",
-                min_value=2, max_value=50, value=30, step=1,
-                help="Labels longer than this threshold will be replaced by N1, N2, etc.",
-            )
-        else:
-            st.session_state['max_label_length'] = 30
+        st.session_state['max_label_length'] = 0  # unused in v4 engine
         st.session_state['show_definitions'] = st.checkbox(
             "📖 Show concept definitions in tooltips",
             value=True,
