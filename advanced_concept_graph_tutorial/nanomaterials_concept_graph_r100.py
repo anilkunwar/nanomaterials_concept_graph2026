@@ -5877,194 +5877,194 @@ def run_batch_analysis(
                 st.error("No graph could be built from the processed batches.")
                 bs["finalize_error"] = "Empty graph"
                 return
-        min_freq = config.get("MIN_CONCEPT_FREQ", 2)
-        top_n = config.get("TOP_N_CONCEPTS", 1000)
-        with status:
-            st.write("🧩 Finalizing — selecting top concepts...")
-        valid_concepts = [
-            c for c, f in bs["concept_freq"].items() if f >= min_freq
-        ]
-        valid_concepts.sort(
-            key=lambda c: len(bs["concept_abstract_map"].get(c, [])),
-            reverse=True,
-        )
-        valid_concepts = valid_concepts[:top_n]
-        if len(valid_concepts) < 5:
-            st.error(
-                "Too few concepts extracted. "
-                "Try lowering frequency thresholds."
+            min_freq = config.get("MIN_CONCEPT_FREQ", 2)
+            top_n = config.get("TOP_N_CONCEPTS", 1000)
+            with status:
+                st.write("🧩 Finalizing — selecting top concepts...")
+            valid_concepts = [
+                c for c, f in bs["concept_freq"].items() if f >= min_freq
+            ]
+            valid_concepts.sort(
+                key=lambda c: len(bs["concept_abstract_map"].get(c, [])),
+                reverse=True,
             )
-            bs["finalize_error"] = "Too few concepts"
-            return
-        valid_set = set(valid_concepts)
-        drop_nodes = [n for n in merged.nodes() if n not in valid_set]
-        merged.remove_nodes_from(drop_nodes)
-        del drop_nodes
-        concept_to_id = {c: i for i, c in enumerate(valid_concepts)}
-        id_to_concept = {i: c for i, c in enumerate(valid_concepts)}
-        concept_abstract_map = {
-            c: bs["concept_abstract_map"][c] for c in valid_concepts
-        }
-        progress_bar.progress(0.90)
-
-        with status:
-            st.write("🔢 Generating node embeddings...")
-        try:
-            with torch.no_grad():
-                embeddings = embed_model.encode(
-                    valid_concepts, show_progress_bar=False,
-                    batch_size=32, convert_to_numpy=True,
+            valid_concepts = valid_concepts[:top_n]
+            if len(valid_concepts) < 5:
+                st.error(
+                    "Too few concepts extracted. "
+                    "Try lowering frequency thresholds."
                 )
-            node_features = torch.tensor(embeddings, dtype=torch.float32)
-            del embeddings
-        except Exception:
-            node_features = torch.randn(len(valid_concepts), 384)
-        gc.collect()
+                bs["finalize_error"] = "Too few concepts"
+                return
+            valid_set = set(valid_concepts)
+            drop_nodes = [n for n in merged.nodes() if n not in valid_set]
+            merged.remove_nodes_from(drop_nodes)
+            del drop_nodes
+            concept_to_id = {c: i for i, c in enumerate(valid_concepts)}
+            id_to_concept = {i: c for i, c in enumerate(valid_concepts)}
+            concept_abstract_map = {
+                c: bs["concept_abstract_map"][c] for c in valid_concepts
+            }
+            progress_bar.progress(0.90)
 
-        with status:
-            st.write("🧠 Training GraphSAGE (final, once)...")
-        pos_pairs, neg_pairs = sample_edges_for_training(
-            merged, valid_concepts, concept_to_id, config, memory_safe=True,
-        )
-        epochs = int(st.session_state.get("batch_gnn_epochs", 40))
+            with status:
+                st.write("🔢 Generating node embeddings...")
+            try:
+                with torch.no_grad():
+                    embeddings = embed_model.encode(
+                        valid_concepts, show_progress_bar=False,
+                        batch_size=32, convert_to_numpy=True,
+                    )
+                node_features = torch.tensor(embeddings, dtype=torch.float32)
+                del embeddings
+            except Exception:
+                node_features = torch.randn(len(valid_concepts), 384)
+            gc.collect()
 
-        def _gnn_progress(epoch, loss):
-            frac = 0.90 + (epoch / max(epochs, 1)) * 0.05
-            progress_bar.progress(min(frac, 0.95))
-            if epoch % 10 == 0:
-                with status:
-                    st.write(f"Epoch {epoch}/{epochs} | Loss: {loss:.4f}")
+            with status:
+                st.write("🧠 Training GraphSAGE (final, once)...")
+            pos_pairs, neg_pairs = sample_edges_for_training(
+                merged, valid_concepts, concept_to_id, config, memory_safe=True,
+            )
+            epochs = int(st.session_state.get("batch_gnn_epochs", 40))
 
-        gnn_model, final_emb, adj_indices, adj_values = train_gnn(
-            node_features, merged, concept_to_id,
-            pos_pairs, neg_pairs, _gnn_progress, epochs=epochs,
-        )
-        del pos_pairs, neg_pairs, adj_indices, adj_values
-        gc.collect()
+            def _gnn_progress(epoch, loss):
+                frac = 0.90 + (epoch / max(epochs, 1)) * 0.05
+                progress_bar.progress(min(frac, 0.95))
+                if epoch % 10 == 0:
+                    with status:
+                        st.write(f"Epoch {epoch}/{epochs} | Loss: {loss:.4f}")
 
-        with status:
-            st.write("🎯 Scoring research directions...")
-        concept_properties: Dict[str, float] = {}
-        all_metrics = bs["all_metrics"]
-        for concept in valid_concepts:
-            values: List[float] = []
-            for idx in concept_abstract_map.get(concept, []):
-                if idx < len(all_metrics):
-                    for metric_values in all_metrics[idx].values():
-                        values.extend(metric_values)
-            concept_properties[concept] = (
-                float(np.median(values)) if values else 0.0
+            gnn_model, final_emb, adj_indices, adj_values = train_gnn(
+                node_features, merged, concept_to_id,
+                pos_pairs, neg_pairs, _gnn_progress, epochs=epochs,
             )
-        X_feat: List[List[float]] = []
-        y_target: List[float] = []
-        for u, v in merged.edges():
-            pu = concept_properties.get(u, 0)
-            pv = concept_properties.get(v, 0)
-            w = merged[u][v].get('weight', 1)
-            X_feat.append([pu, pv, w])
-            y_target.append(
-                max(pu, pv) * 1.08 if max(pu, pv) > 0 else 0
-            )
-        ridge = None
-        if len(X_feat) > 5:
-            ridge = Ridge(alpha=1.0).fit(
-                np.array(X_feat), np.array(y_target)
-            )
-        top_scores = compute_research_direction_scores(
-            gnn_model, node_features, final_emb, merged,
-            valid_concepts, concept_properties, ridge, embed_model,
-        )
-        del X_feat, y_target, node_features
-        gc.collect()
+            del pos_pairs, neg_pairs, adj_indices, adj_values
+            gc.collect()
 
-        with status:
-            st.write("🧪 Distillation + advanced analytics...")
-        distill_df = compute_concept_distillation(
-            valid_concepts, concept_abstract_map, bs["all_texts"],
-            max_docs_per_concept=30,
-        )
-        burst_df = None
-        drift_df = None
-        genealogy_df = None
-        bridge_df = None
-        motifs: Dict[str, Any] = {}
-        try:
-            burst_df = detect_keyword_bursts(
-                df_filtered, valid_concepts,
-                concept_abstract_map, selected_text_cols,
+            with status:
+                st.write("🎯 Scoring research directions...")
+            concept_properties: Dict[str, float] = {}
+            all_metrics = bs["all_metrics"]
+            for concept in valid_concepts:
+                values: List[float] = []
+                for idx in concept_abstract_map.get(concept, []):
+                    if idx < len(all_metrics):
+                        for metric_values in all_metrics[idx].values():
+                            values.extend(metric_values)
+                concept_properties[concept] = (
+                    float(np.median(values)) if values else 0.0
+                )
+            X_feat: List[List[float]] = []
+            y_target: List[float] = []
+            for u, v in merged.edges():
+                pu = concept_properties.get(u, 0)
+                pv = concept_properties.get(v, 0)
+                w = merged[u][v].get('weight', 1)
+                X_feat.append([pu, pv, w])
+                y_target.append(
+                    max(pu, pv) * 1.08 if max(pu, pv) > 0 else 0
+                )
+            ridge = None
+            if len(X_feat) > 5:
+                ridge = Ridge(alpha=1.0).fit(
+                    np.array(X_feat), np.array(y_target)
+                )
+            top_scores = compute_research_direction_scores(
+                gnn_model, node_features, final_emb, merged,
+                valid_concepts, concept_properties, ridge, embed_model,
             )
-            drift_df = detect_semantic_drift(
-                df_filtered, valid_concepts,
-                concept_abstract_map, selected_text_cols,
+            del X_feat, y_target, node_features
+            gc.collect()
+
+            with status:
+                st.write("🧪 Distillation + advanced analytics...")
+            distill_df = compute_concept_distillation(
+                valid_concepts, concept_abstract_map, bs["all_texts"],
+                max_docs_per_concept=30,
             )
-            genealogy_df = build_concept_genealogy(
-                merged, valid_concepts, concept_abstract_map,
+            burst_df = None
+            drift_df = None
+            genealogy_df = None
+            bridge_df = None
+            motifs: Dict[str, Any] = {}
+            try:
+                burst_df = detect_keyword_bursts(
+                    df_filtered, valid_concepts,
+                    concept_abstract_map, selected_text_cols,
+                )
+                drift_df = detect_semantic_drift(
+                    df_filtered, valid_concepts,
+                    concept_abstract_map, selected_text_cols,
+                )
+                genealogy_df = build_concept_genealogy(
+                    merged, valid_concepts, concept_abstract_map,
+                )
+                bridge_df = detect_cross_domain_bridges(
+                    merged, valid_concepts, concept_abstract_map,
+                )
+                motifs = analyze_network_motifs(merged)
+            except Exception as e:
+                st.warning(f"Some analytics skipped: {e}")
+            st.session_state.burst_df = burst_df
+            st.session_state.drift_df = drift_df
+            st.session_state.genealogy_df = genealogy_df
+            st.session_state.bridge_df = bridge_df
+            st.session_state.motifs = motifs
+            gc.collect()
+
+            analysis_data = {
+                "valid_concepts": valid_concepts,
+                "concept_to_id": concept_to_id,
+                "id_to_concept": id_to_concept,
+                "concept_abstract_map": concept_abstract_map,
+                "nx_graph": merged,
+                "concept_properties": concept_properties,
+                "ridge": ridge,
+                "top_scores": top_scores,
+                "distill_df": distill_df,
+                "gnn_model": gnn_model,
+                "final_emb": final_emb,
+                "embed_model": embed_model,
+                "all_metrics": bs["all_metrics"],
+                "all_texts": bs["all_texts"],
+                "config": config,
+                "df_filtered": df_filtered,
+                "selected_text_cols": selected_text_cols,
+                "batch_info": {
+                    "mode": "batch",
+                    "batch_size": batch_size,
+                    "total_batches": total_batches,
+                    "total_docs": total_docs,
+                },
+            }
+            if use_ontology:
+                analysis_data.update({
+                    "ontology": ontology,
+                    "resolver": bs["resolver"],
+                    "extractor": bs["extractor"],
+                    "graph_builder": bs["builder"],
+                    "reasoning_paths": (
+                        bs["builder"].reasoning_paths if bs["builder"] else []
+                    ),
+                })
+            st.session_state.analysis_data = analysis_data
+            st.session_state.edit_history = GraphEditHistory()
+            st.session_state.edit_history.save_snapshot(
+                merged, valid_concepts, concept_to_id,
+                id_to_concept, concept_abstract_map,
             )
-            bridge_df = detect_cross_domain_bridges(
-                merged, valid_concepts, concept_abstract_map,
-            )
-            motifs = analyze_network_motifs(merged)
+            bs["all_concepts"] = []
+            bs["valid_doc_indices"] = set()
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            bs["done"] = True
+            bs.pop("finalize_error", None)
+
         except Exception as e:
-            st.warning(f"Some analytics skipped: {e}")
-        st.session_state.burst_df = burst_df
-        st.session_state.drift_df = drift_df
-        st.session_state.genealogy_df = genealogy_df
-        st.session_state.bridge_df = bridge_df
-        st.session_state.motifs = motifs
-        gc.collect()
-
-        analysis_data = {
-            "valid_concepts": valid_concepts,
-            "concept_to_id": concept_to_id,
-            "id_to_concept": id_to_concept,
-            "concept_abstract_map": concept_abstract_map,
-            "nx_graph": merged,
-            "concept_properties": concept_properties,
-            "ridge": ridge,
-            "top_scores": top_scores,
-            "distill_df": distill_df,
-            "gnn_model": gnn_model,
-            "final_emb": final_emb,
-            "embed_model": embed_model,
-            "all_metrics": bs["all_metrics"],
-            "all_texts": bs["all_texts"],
-            "config": config,
-            "df_filtered": df_filtered,
-            "selected_text_cols": selected_text_cols,
-            "batch_info": {
-                "mode": "batch",
-                "batch_size": batch_size,
-                "total_batches": total_batches,
-                "total_docs": total_docs,
-            },
-        }
-        if use_ontology:
-            analysis_data.update({
-                "ontology": ontology,
-                "resolver": bs["resolver"],
-                "extractor": bs["extractor"],
-                "graph_builder": bs["builder"],
-                "reasoning_paths": (
-                    bs["builder"].reasoning_paths if bs["builder"] else []
-                ),
-            })
-        st.session_state.analysis_data = analysis_data
-        st.session_state.edit_history = GraphEditHistory()
-        st.session_state.edit_history.save_snapshot(
-            merged, valid_concepts, concept_to_id,
-            id_to_concept, concept_abstract_map,
-        )
-        bs["all_concepts"] = []
-        bs["valid_doc_indices"] = set()
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        bs["done"] = True
-        bs.pop("finalize_error", None)
-
-    except Exception as e:
-        bs["finalize_error"] = str(e)
-        raise
+            bs["finalize_error"] = str(e)
+            raise
 
     try:
         for b in pending:
