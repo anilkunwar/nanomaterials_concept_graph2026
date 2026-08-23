@@ -2192,6 +2192,346 @@ def normalize_nanomat_concept(concept: str) -> str:
     return concept
 
 
+# ============================================================================
+# QDWA ENGINE — Query-Driven Weight Allocation for 3 Nanomaterials Domains
+# ============================================================================
+from enum import Enum
+
+class NanoQDWACategory(Enum):
+    NT_CU = "nt_cu_electrodeposition"
+    DEF_AG = "def_ag_defect_engineering"
+    CU_AG = "cu_ag_core_shell"
+
+CATEGORY_DISPLAY = {
+    "nt_cu_electrodeposition": "Electrodeposited nt-Cu",
+    "def_ag_defect_engineering": "Defect-Engineered Ag",
+    "cu_ag_core_shell": "Cu@Ag Core-Shell",
+}
+
+CATEGORY_COLORS = {
+    "nt_cu_electrodeposition": "#E74C3C",
+    "def_ag_defect_engineering": "#F39C12",
+    "cu_ag_core_shell": "#3498DB",
+}
+
+CATEGORY_SEEDS = {
+    "nt_cu_electrodeposition": [
+        "nanotwinned copper electrodeposition pulse current",
+        "twin boundary spacing coherent interface strength conductivity",
+        "nt-Cu thin film microstructure dislocation pile-up"
+    ],
+    "def_ag_defect_engineering": [
+        "defect engineered silver nanoparticles vacancy dislocation",
+        "irradiation point defect stacking fault energy Ag",
+        "vacancy clustering thermal stability defect engineering"
+    ],
+    "cu_ag_core_shell": [
+        "Cu@Ag core-shell nanoparticle interface thermal conductivity",
+        "copper silver core shell sputtering lattice mismatch",
+        "core-shell nanostructure hardness corrosion resistance"
+    ]
+}
+
+CONCEPT_TO_CATEGORY = {
+    "nanotwinned_copper": "nt_cu_electrodeposition",
+    "twin_boundary": "nt_cu_electrodeposition",
+    "coherent_twin_boundary": "nt_cu_electrodeposition",
+    "incoherent_twin_boundary": "nt_cu_electrodeposition",
+    "electrodeposition": "nt_cu_electrodeposition",
+    "thin_film": "nt_cu_electrodeposition",
+    "defect_engineered_ag": "def_ag_defect_engineering",
+    "vacancy": "def_ag_defect_engineering",
+    "dislocation": "def_ag_defect_engineering",
+    "irradiation": "def_ag_defect_engineering",
+    "defect_engineering": "def_ag_defect_engineering",
+    "interstitial": "def_ag_defect_engineering",
+    "core_shell_cuag": "cu_ag_core_shell",
+    "sputtering": "cu_ag_core_shell",
+    "grain_boundary": "cu_ag_core_shell",
+    "interface": "cu_ag_core_shell",
+    "nanoparticle": "cu_ag_core_shell",
+}
+
+
+class NanoQDWAEngine:
+    """
+    Query-Driven Weight Allocation (QDWA) Engine for Nanomaterials.
+    Distills queries into 3 core domains and computes priority-guided
+    subgraph extraction parameters.
+    """
+    BETA = 8.0
+    ALPHA = 0.25
+
+    def __init__(self, ontology, embedding_model=None):
+        self.ontology = ontology
+        self.embedding_model = embedding_model
+        self._seed_embeddings = None
+        self._seed_concepts = None
+        if embedding_model is not None:
+            self._precompute_seed_embeddings()
+
+    def _precompute_seed_embeddings(self):
+        """Precompute embedding vectors for category seed phrases."""
+        self._seed_embeddings = {}
+        self._seed_concepts = {}
+        for cat_key, seeds in CATEGORY_SEEDS.items():
+            if self.embedding_model is not None:
+                try:
+                    with torch.no_grad():
+                        embs = self.embedding_model.encode(
+                            seeds, show_progress_bar=False, 
+                            batch_size=8, convert_to_numpy=True
+                        )
+                    self._seed_embeddings[cat_key] = embs
+                    self._seed_concepts[cat_key] = seeds
+                except Exception:
+                    self._seed_embeddings[cat_key] = None
+
+    def analyze_query(self, query: str, ontology_concepts: List[str] = None):
+        """
+        Compute QDWA weights and subgraph parameters.
+        Returns dict with: W_k, concentration, subgraph_depth, category_scores
+        """
+        if ontology_concepts is None:
+            ontology_concepts = list(self.ontology.concepts.keys())
+
+        # 1. Compute soft membership (Eq 2) — cosine similarity to category seeds
+        mu = self._compute_soft_membership(query)
+
+        # 2. Aggregate raw evidence (Eq 3) — concept frequency in query
+        evidence = self._aggregate_evidence(query, ontology_concepts)
+
+        # 3. Laplace smoothed allocation (Eq 4) → W_k
+        W = self._laplace_allocation(mu, evidence)
+
+        # 4. Concentration c (Eq 5) — entropy-based
+        c = self._compute_concentration(W)
+
+        # 5. Subgraph depth K (Eq 7)
+        K = self._compute_subgraph_depth(c, W)
+
+        # 6. Priority-guided edge reweighting (Eq 9)
+        edge_weights = self._compute_edge_reweights(W, ontology_concepts)
+
+        return {
+            "W": W,
+            "concentration": c,
+            "subgraph_depth": K,
+            "soft_membership": mu,
+            "evidence": evidence,
+            "edge_weights": edge_weights,
+            "primary_category": max(W, key=W.get),
+            "category_scores": W,
+        }
+
+    def _compute_soft_membership(self, query: str) -> Dict[str, float]:
+        """Eq 2: Soft membership via embedding similarity to category seeds."""
+        mu = {}
+        if self.embedding_model is None or not self._seed_embeddings:
+            # Fallback: keyword matching
+            q_lower = query.lower()
+            for cat_key, seeds in CATEGORY_SEEDS.items():
+                scores = [1.0 if any(word in q_lower for word in s.split()) else 0.0 for s in seeds]
+                mu[cat_key] = float(np.mean(scores))
+            return mu
+
+        try:
+            with torch.no_grad():
+                q_emb = self.embedding_model.encode(
+                    query, show_progress_bar=False, convert_to_numpy=True
+                )
+            for cat_key, seed_embs in self._seed_embeddings.items():
+                if seed_embs is not None:
+                    sims = cosine_similarity([q_emb], seed_embs)[0]
+                    mu[cat_key] = float(np.max(sims))
+                else:
+                    mu[cat_key] = 0.33
+        except Exception:
+            for cat_key in CATEGORY_SEEDS:
+                mu[cat_key] = 0.33
+        return mu
+
+    def _aggregate_evidence(self, query: str, ontology_concepts: List[str]) -> Dict[str, float]:
+        """Eq 3: Aggregate raw evidence from concept occurrence in query."""
+        evidence = {cat: 0.0 for cat in CATEGORY_SEEDS.keys()}
+        q_lower = query.lower()
+
+        for concept in ontology_concepts:
+            if concept.replace("_", " ") in q_lower:
+                cat = CONCEPT_TO_CATEGORY.get(concept)
+                if cat:
+                    evidence[cat] += 1.0
+            # Check synonyms
+            if concept in self.ontology.concepts:
+                for syn in self.ontology.concepts[concept].synonyms:
+                    if syn in q_lower:
+                        cat = CONCEPT_TO_CATEGORY.get(concept)
+                        if cat:
+                            evidence[cat] += 0.8
+
+        # Normalize
+        total = sum(evidence.values())
+        if total > 0:
+            evidence = {k: v / total for k, v in evidence.items()}
+        else:
+            evidence = {k: 1.0 / len(evidence) for k in evidence}
+        return evidence
+
+    def _laplace_allocation(self, mu: Dict[str, float], evidence: Dict[str, float]) -> Dict[str, float]:
+        """Eq 4: Laplace-smoothed weight allocation."""
+        n_cats = len(CATEGORY_SEEDS)
+        W = {}
+        for cat in CATEGORY_SEEDS.keys():
+            # Laplace smoothing: (evidence + alpha * mu) / (sum_evidence + alpha)
+            numerator = evidence.get(cat, 0.0) + self.ALPHA * mu.get(cat, 0.0)
+            denominator = sum(evidence.values()) + self.ALPHA
+            W[cat] = numerator / denominator if denominator > 0 else 1.0 / n_cats
+
+        # Normalize to sum to 1
+        total_w = sum(W.values())
+        if total_w > 0:
+            W = {k: v / total_w for k, v in W.items()}
+        return W
+
+    def _compute_concentration(self, W: Dict[str, float]) -> float:
+        """Eq 5: Concentration measure (inverse entropy)."""
+        entropy = 0.0
+        for w in W.values():
+            if w > 1e-10:
+                entropy -= w * np.log(w)
+        max_entropy = np.log(len(W))
+        c = 1.0 - (entropy / max_entropy) if max_entropy > 0 else 0.0
+        return float(np.clip(c, 0.0, 1.0))
+
+    def _compute_subgraph_depth(self, c: float, W: Dict[str, float]) -> int:
+        """Eq 7: Subgraph depth based on concentration."""
+        w_max = max(W.values())
+        # Depth increases with concentration and max weight
+        K = int(np.round(2 + c * 3 + w_max * 2))
+        return int(np.clip(K, 2, 6))
+
+    def _compute_edge_reweights(self, W: Dict[str, float], ontology_concepts: List[str]) -> Dict[str, float]:
+        """Eq 9: Reweight edges based on category priority."""
+        reweights = {}
+        primary_cat = max(W, key=W.get)
+        primary_weight = W[primary_cat]
+
+        for concept in ontology_concepts:
+            cat = CONCEPT_TO_CATEGORY.get(concept, None)
+            if cat == primary_cat:
+                reweights[concept] = 1.0 + self.BETA * primary_weight
+            elif cat in W:
+                reweights[concept] = 1.0 + self.BETA * W[cat] * 0.5
+            else:
+                reweights[concept] = 1.0
+        return reweights
+
+
+def render_nano_qdwa_tab():
+    """Render the QDWA Weights tab with Sankey, Radar, and Math Trace."""
+    st.subheader("⚖️ QDWA Domain Weights")
+    st.markdown("Query-Driven Weight Allocation across the 3 Nanomaterials core domains.")
+
+    engine = st.session_state.get("nano_qdwa_engine")
+    if engine is None:
+        st.warning("QDWA Engine not initialized. Please build the graph first.")
+        return
+
+    query = st.session_state.get("last_query_text", "")
+    if not query:
+        st.info("Enter a query in the 🤖 LLM-Guided Q&A tab to compute QDWA weights.")
+        query = st.text_input("Or enter a query here:", value="", key="qdwa_query_input")
+    else:
+        st.info(f"Using last query: **{query}**")
+
+    if query:
+        result = engine.analyze_query(query)
+        W = result["W"]
+        c = result["concentration"]
+        K = result["subgraph_depth"]
+
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Concentration", f"{c:.3f}")
+        col2.metric("Subgraph Depth", K)
+        col3.metric("Primary Domain", CATEGORY_DISPLAY.get(result["primary_category"], "Unknown"))
+
+        # Sankey diagram
+        st.markdown("### Domain Weight Flow")
+        sankey_data = {
+            "source": ["Query"] * len(W),
+            "target": [CATEGORY_DISPLAY.get(k, k) for k in W.keys()],
+            "value": list(W.values())
+        }
+        fig = go.Figure(data=[go.Sankey(
+            node=dict(
+                pad=15, thickness=20,
+                line=dict(color="black", width=0.5),
+                label=["Query"] + [CATEGORY_DISPLAY.get(k, k) for k in W.keys()],
+                color=["#95A5A6"] + [CATEGORY_COLORS.get(k, "#95A5A6") for k in W.keys()]
+            ),
+            link=dict(
+                source=[0] * len(W),
+                target=list(range(1, len(W) + 1)),
+                value=list(W.values()),
+                color=[CATEGORY_COLORS.get(k, "#95A5A6") for k in W.keys()]
+            )
+        )])
+        fig.update_layout(title_text="QDWA Weight Allocation", font_size=12)
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Radar chart
+        st.markdown("### Domain Weight Radar")
+        categories = [CATEGORY_DISPLAY.get(k, k) for k in W.keys()]
+        values = list(W.values())
+        values.append(values[0])  # Close the loop
+        categories.append(categories[0])
+
+        fig2 = go.Figure(data=go.Scatterpolar(
+            r=values,
+            theta=categories,
+            fill='toself',
+            name='QDWA Weights',
+            line_color='#E74C3C',
+            fillcolor='rgba(231, 76, 60, 0.3)'
+        ))
+        fig2.update_layout(
+            polar=dict(radialaxis=dict(visible=True, range=[0, max(values) * 1.2])),
+            showlegend=False,
+            title="Domain Weight Distribution"
+        )
+        st.plotly_chart(fig2, use_container_width=True)
+
+        # Math trace
+        st.markdown("### Mathematical Trace")
+        with st.expander("Show QDWA Equations", expanded=True):
+            st.latex(r"\mu_k(q) = \max_{s \in S_k} \cos(\mathbf{e}_q, \mathbf{e}_s) \quad \text{(Soft Membership)}")
+            st.latex(r"E_k(q) = \sum_{c \in C_k} \mathbb{1}[c \in q] \quad \text{(Evidence Aggregation)}")
+            st.latex(r"W_k = \frac{E_k + \alpha \mu_k}{\sum_j E_j + \alpha} \quad \text{(Laplace Allocation)}")
+            st.latex(r"c = 1 - \frac{H(W)}{\log K} \quad \text{(Concentration)}")
+            st.latex(r"K_{sub} = \left\lfloor 2 + 3c + 2\max(W) \right\rfloor \quad \text{(Subgraph Depth)}")
+
+            st.markdown("**Computed Values:**")
+            math_df = pd.DataFrame({
+                "Domain": [CATEGORY_DISPLAY.get(k, k) for k in W.keys()],
+                "Soft Membership (μ)": [f"{result['soft_membership'].get(k, 0):.3f}" for k in W.keys()],
+                "Evidence (E)": [f"{result['evidence'].get(k, 0):.3f}" for k in W.keys()],
+                "Weight (W)": [f"{v:.3f}" for v in W.values()],
+                "Color": [CATEGORY_COLORS.get(k, "#95A5A6") for k in W.keys()]
+            })
+            st.dataframe(math_df, use_container_width=True)
+
+        # Edge reweight preview
+        st.markdown("### Priority-Guided Edge Reweights (Top 15)")
+        edge_weights = result["edge_weights"]
+        sorted_reweights = sorted(edge_weights.items(), key=lambda x: x[1], reverse=True)[:15]
+        rw_df = pd.DataFrame([
+            {"Concept": k, "Reweight Factor": f"{v:.2f}", 
+             "Category": CATEGORY_DISPLAY.get(CONCEPT_TO_CATEGORY.get(k, ""), "Other")}
+            for k, v in sorted_reweights
+        ])
+        st.dataframe(rw_df, use_container_width=True)
+
+
 def extract_concepts_from_text(text: str) -> List[str]:
     concepts: Set[str] = set()
     text_lower = text.lower()
@@ -2697,6 +3037,239 @@ def train_gnn(
             neg_v[:1] if len(neg_pairs) > 0 else pos_v[:1],
         )
     return model, final_embeddings.cpu(), adj_indices.cpu(), adj_values.cpu()
+
+
+# ============================================================================
+# MICROTRANSFORMER KG-RAG — LatentMoE Routing for Nanomaterials
+# ============================================================================
+
+NANOMAT_EXPERT_LABELS = [
+    "Twin Boundary Engineering", "Defect Optimization", "Core-Shell Interface",
+    "Electrodeposition Kinetics", "Yield Strength", "Electrical Conductivity",
+    "Thermal Stability", "Grain Boundary", "Stacking Fault Energy",
+    "Dislocation Dynamics", "Irradiation Effects", "TEM Characterization"
+]
+
+class LatentMoEKGExtractor(nn.Module):
+    """
+    Latent Mixture-of-Experts transformer for KG path routing.
+    Routes relational path tokens through specialized nanomaterials experts.
+    """
+    def __init__(self, input_dim: int = 384, hidden_dim: int = 256, 
+                 n_experts: int = 12, n_heads: int = 4, n_layers: int = 2,
+                 dropout: float = 0.1):
+        super().__init__()
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
+        self.n_experts = n_experts
+
+        # Input projection
+        self.input_proj = nn.Linear(input_dim, hidden_dim)
+
+        # Latent routing (gating network)
+        self.gate = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim // 2, n_experts)
+        )
+
+        # Expert FFNs
+        self.experts = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(hidden_dim, hidden_dim * 2),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(hidden_dim * 2, hidden_dim)
+            ) for _ in range(n_experts)
+        ])
+
+        # Transformer layers for path encoding
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=hidden_dim, nhead=n_heads, 
+            dim_feedforward=hidden_dim * 2, dropout=dropout,
+            batch_first=True
+        )
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+
+        # Output head
+        self.output_proj = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim // 2, 1)
+        )
+
+    def forward(self, path_embeddings: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Args:
+            path_embeddings: [batch_size, seq_len, input_dim]
+        Returns:
+            scores: [batch_size] — path relevance scores
+            expert_activations: [batch_size, n_experts] — gating weights
+        """
+        # Project input
+        h = self.input_proj(path_embeddings)  # [B, L, H]
+
+        # Transformer encoding
+        h = self.transformer(h)  # [B, L, H]
+
+        # Pool across sequence
+        h_pooled = h.mean(dim=1)  # [B, H]
+
+        # Gating
+        gate_logits = self.gate(h_pooled)  # [B, n_experts]
+        expert_activations = F.softmax(gate_logits, dim=-1)  # [B, n_experts]
+
+        # Mixture of Experts
+        expert_outputs = torch.stack([exp(h_pooled) for exp in self.experts], dim=1)  # [B, n_experts, H]
+
+        # Weighted combination
+        weights = expert_activations.unsqueeze(-1)  # [B, n_experts, 1]
+        mixed = (expert_outputs * weights).sum(dim=1)  # [B, H]
+
+        # Residual + output
+        mixed = mixed + h_pooled
+        scores = self.output_proj(mixed).squeeze(-1)  # [B]
+
+        return scores, expert_activations
+
+
+def render_microtransformer_kg_rag_tab(analysis_data, ontology):
+    """Render Microtransformer KG-RAG tab with path routing visualization."""
+    st.subheader("🧠 Microtransformer KG-RAG (LatentMoE)")
+    st.markdown("Routes relational paths through 12 nanomaterials-specific latent experts.")
+
+    nx_graph = analysis_data.get("nx_graph")
+    embed_model = analysis_data.get("embed_model")
+
+    if nx_graph is None or embed_model is None:
+        st.warning("Graph or embedding model not available. Build the graph first.")
+        return
+
+    if len(nx_graph.nodes()) < 3:
+        st.info("Graph too small for path analysis.")
+        return
+
+    # Source/Target selection
+    valid_nodes = sorted([n for n in nx_graph.nodes() if n in ontology.concepts])
+    if len(valid_nodes) < 2:
+        st.info("Not enough ontology-mapped nodes in graph.")
+        return
+
+    col1, col2 = st.columns(2)
+    with col1:
+        source = st.selectbox("Source Concept:", valid_nodes, index=0, key="moe_source")
+    with col2:
+        target = st.selectbox("Target Concept:", valid_nodes, index=min(1, len(valid_nodes)-1), key="moe_target")
+
+    if source == target:
+        st.warning("Source and target must be different.")
+        return
+
+    # Find shortest path
+    try:
+        path = nx.shortest_path(nx_graph, source=source, target=target, weight='weight')
+    except nx.NetworkXNoPath:
+        st.error(f"No path found between {source} and {target}.")
+        return
+
+    st.success(f"Path found: {' → '.join(path)} (length {len(path)-1})")
+
+    # Encode path
+    try:
+        with torch.no_grad():
+            path_embs = embed_model.encode(path, show_progress_bar=False, convert_to_numpy=True)
+        path_tensor = torch.tensor(path_embs, dtype=torch.float32).unsqueeze(0)  # [1, L, D]
+
+        # Initialize model
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        model = LatentMoEKGExtractor(input_dim=path_embs.shape[1], n_experts=12).to(device)
+        path_tensor = path_tensor.to(device)
+
+        with torch.no_grad():
+            scores, activations = model(path_tensor)
+
+        scores = scores.cpu().numpy()
+        activations = activations.cpu().numpy()[0]  # [n_experts]
+
+        # Expert Activation Heatmap
+        st.markdown("### Expert Activation Heatmap")
+        heatmap_df = pd.DataFrame({
+            "Expert": NANOMAT_EXPERT_LABELS,
+            "Activation": activations,
+            "Category": ["Structural", "Defect", "Interface", "Process", "Mechanical", 
+                        "Functional", "Thermal", "Structural", "Defect", "Mechanical", 
+                        "Process", "Characterization"]
+        })
+
+        fig = px.imshow(
+            [activations],
+            x=NANOMAT_EXPERT_LABELS,
+            y=["Path Activation"],
+            color_continuous_scale="Viridis",
+            aspect="auto",
+            title="Latent Expert Activations"
+        )
+        fig.update_layout(xaxis_tickangle=-45)
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Sankey: Path → Experts
+        st.markdown("### Path-to-Expert Routing")
+        sankey_sources = []
+        sankey_targets = []
+        sankey_values = []
+
+        path_labels = [p.replace("_", " ").title() for p in path]
+        for i, node in enumerate(path):
+            for j, act in enumerate(activations):
+                if act > 0.1:  # Threshold for visibility
+                    sankey_sources.append(i)
+                    sankey_targets.append(len(path) + j)
+                    sankey_values.append(float(act))
+
+        all_labels = path_labels + NANOMAT_EXPERT_LABELS
+        fig2 = go.Figure(data=[go.Sankey(
+            node=dict(
+                pad=15, thickness=20,
+                label=all_labels,
+                color=["#3498DB"] * len(path) + ["#E74C3C"] * len(NANOMAT_EXPERT_LABELS)
+            ),
+            link=dict(
+                source=sankey_sources,
+                target=sankey_targets,
+                value=sankey_values,
+                color=["rgba(52, 152, 219, 0.4)"] * len(sankey_values)
+            )
+        )])
+        fig2.update_layout(title_text="Concept Path → Expert Routing", font_size=10)
+        st.plotly_chart(fig2, use_container_width=True)
+
+        # Bar chart of top experts
+        st.markdown("### Top Activated Experts")
+        sorted_experts = sorted(zip(NANOMAT_EXPERT_LABELS, activations), key=lambda x: x[1], reverse=True)
+        bar_df = pd.DataFrame(sorted_experts, columns=["Expert", "Activation"])
+        fig3 = px.bar(
+            bar_df, x="Expert", y="Activation",
+            color="Activation", color_continuous_scale="Plasma",
+            title="Expert Activation Strength"
+        )
+        fig3.update_layout(xaxis_tickangle=-30)
+        st.plotly_chart(fig3, use_container_width=True)
+
+        # Path relevance score
+        st.metric("Path Relevance Score", f"{float(scores[0]):.3f}")
+
+        # Reasoning explanation
+        st.markdown("### 🔍 Reasoning Explanation")
+        top_3_idx = np.argsort(activations)[-3:][::-1]
+        explanation = f"The path from **{source}** to **{target}** strongly activates:"
+        for idx in top_3_idx:
+            explanation += f"\n- **{NANOMAT_EXPERT_LABELS[idx]}** ({activations[idx]:.1%})"
+        st.info(explanation)
+
+    except Exception as e:
+        st.error(f"Microtransformer analysis failed: {e}")
+        st.code(traceback.format_exc())
 
 
 # ============================================================================
@@ -5877,194 +6450,194 @@ def run_batch_analysis(
                 st.error("No graph could be built from the processed batches.")
                 bs["finalize_error"] = "Empty graph"
                 return
-        min_freq = config.get("MIN_CONCEPT_FREQ", 2)
-        top_n = config.get("TOP_N_CONCEPTS", 1000)
-        with status:
-            st.write("🧩 Finalizing — selecting top concepts...")
-        valid_concepts = [
-            c for c, f in bs["concept_freq"].items() if f >= min_freq
-        ]
-        valid_concepts.sort(
-            key=lambda c: len(bs["concept_abstract_map"].get(c, [])),
-            reverse=True,
-        )
-        valid_concepts = valid_concepts[:top_n]
-        if len(valid_concepts) < 5:
-            st.error(
-                "Too few concepts extracted. "
-                "Try lowering frequency thresholds."
+            min_freq = config.get("MIN_CONCEPT_FREQ", 2)
+            top_n = config.get("TOP_N_CONCEPTS", 1000)
+            with status:
+                st.write("🧩 Finalizing — selecting top concepts...")
+            valid_concepts = [
+                c for c, f in bs["concept_freq"].items() if f >= min_freq
+            ]
+            valid_concepts.sort(
+                key=lambda c: len(bs["concept_abstract_map"].get(c, [])),
+                reverse=True,
             )
-            bs["finalize_error"] = "Too few concepts"
-            return
-        valid_set = set(valid_concepts)
-        drop_nodes = [n for n in merged.nodes() if n not in valid_set]
-        merged.remove_nodes_from(drop_nodes)
-        del drop_nodes
-        concept_to_id = {c: i for i, c in enumerate(valid_concepts)}
-        id_to_concept = {i: c for i, c in enumerate(valid_concepts)}
-        concept_abstract_map = {
-            c: bs["concept_abstract_map"][c] for c in valid_concepts
-        }
-        progress_bar.progress(0.90)
-
-        with status:
-            st.write("🔢 Generating node embeddings...")
-        try:
-            with torch.no_grad():
-                embeddings = embed_model.encode(
-                    valid_concepts, show_progress_bar=False,
-                    batch_size=32, convert_to_numpy=True,
+            valid_concepts = valid_concepts[:top_n]
+            if len(valid_concepts) < 5:
+                st.error(
+                    "Too few concepts extracted. "
+                    "Try lowering frequency thresholds."
                 )
-            node_features = torch.tensor(embeddings, dtype=torch.float32)
-            del embeddings
-        except Exception:
-            node_features = torch.randn(len(valid_concepts), 384)
-        gc.collect()
+                bs["finalize_error"] = "Too few concepts"
+                return
+            valid_set = set(valid_concepts)
+            drop_nodes = [n for n in merged.nodes() if n not in valid_set]
+            merged.remove_nodes_from(drop_nodes)
+            del drop_nodes
+            concept_to_id = {c: i for i, c in enumerate(valid_concepts)}
+            id_to_concept = {i: c for i, c in enumerate(valid_concepts)}
+            concept_abstract_map = {
+                c: bs["concept_abstract_map"][c] for c in valid_concepts
+            }
+            progress_bar.progress(0.90)
 
-        with status:
-            st.write("🧠 Training GraphSAGE (final, once)...")
-        pos_pairs, neg_pairs = sample_edges_for_training(
-            merged, valid_concepts, concept_to_id, config, memory_safe=True,
-        )
-        epochs = int(st.session_state.get("batch_gnn_epochs", 40))
+            with status:
+                st.write("🔢 Generating node embeddings...")
+            try:
+                with torch.no_grad():
+                    embeddings = embed_model.encode(
+                        valid_concepts, show_progress_bar=False,
+                        batch_size=32, convert_to_numpy=True,
+                    )
+                node_features = torch.tensor(embeddings, dtype=torch.float32)
+                del embeddings
+            except Exception:
+                node_features = torch.randn(len(valid_concepts), 384)
+            gc.collect()
 
-        def _gnn_progress(epoch, loss):
-            frac = 0.90 + (epoch / max(epochs, 1)) * 0.05
-            progress_bar.progress(min(frac, 0.95))
-            if epoch % 10 == 0:
-                with status:
-                    st.write(f"Epoch {epoch}/{epochs} | Loss: {loss:.4f}")
+            with status:
+                st.write("🧠 Training GraphSAGE (final, once)...")
+            pos_pairs, neg_pairs = sample_edges_for_training(
+                merged, valid_concepts, concept_to_id, config, memory_safe=True,
+            )
+            epochs = int(st.session_state.get("batch_gnn_epochs", 40))
 
-        gnn_model, final_emb, adj_indices, adj_values = train_gnn(
-            node_features, merged, concept_to_id,
-            pos_pairs, neg_pairs, _gnn_progress, epochs=epochs,
-        )
-        del pos_pairs, neg_pairs, adj_indices, adj_values
-        gc.collect()
+            def _gnn_progress(epoch, loss):
+                frac = 0.90 + (epoch / max(epochs, 1)) * 0.05
+                progress_bar.progress(min(frac, 0.95))
+                if epoch % 10 == 0:
+                    with status:
+                        st.write(f"Epoch {epoch}/{epochs} | Loss: {loss:.4f}")
 
-        with status:
-            st.write("🎯 Scoring research directions...")
-        concept_properties: Dict[str, float] = {}
-        all_metrics = bs["all_metrics"]
-        for concept in valid_concepts:
-            values: List[float] = []
-            for idx in concept_abstract_map.get(concept, []):
-                if idx < len(all_metrics):
-                    for metric_values in all_metrics[idx].values():
-                        values.extend(metric_values)
-            concept_properties[concept] = (
-                float(np.median(values)) if values else 0.0
+            gnn_model, final_emb, adj_indices, adj_values = train_gnn(
+                node_features, merged, concept_to_id,
+                pos_pairs, neg_pairs, _gnn_progress, epochs=epochs,
             )
-        X_feat: List[List[float]] = []
-        y_target: List[float] = []
-        for u, v in merged.edges():
-            pu = concept_properties.get(u, 0)
-            pv = concept_properties.get(v, 0)
-            w = merged[u][v].get('weight', 1)
-            X_feat.append([pu, pv, w])
-            y_target.append(
-                max(pu, pv) * 1.08 if max(pu, pv) > 0 else 0
-            )
-        ridge = None
-        if len(X_feat) > 5:
-            ridge = Ridge(alpha=1.0).fit(
-                np.array(X_feat), np.array(y_target)
-            )
-        top_scores = compute_research_direction_scores(
-            gnn_model, node_features, final_emb, merged,
-            valid_concepts, concept_properties, ridge, embed_model,
-        )
-        del X_feat, y_target, node_features
-        gc.collect()
+            del pos_pairs, neg_pairs, adj_indices, adj_values
+            gc.collect()
 
-        with status:
-            st.write("🧪 Distillation + advanced analytics...")
-        distill_df = compute_concept_distillation(
-            valid_concepts, concept_abstract_map, bs["all_texts"],
-            max_docs_per_concept=30,
-        )
-        burst_df = None
-        drift_df = None
-        genealogy_df = None
-        bridge_df = None
-        motifs: Dict[str, Any] = {}
-        try:
-            burst_df = detect_keyword_bursts(
-                df_filtered, valid_concepts,
-                concept_abstract_map, selected_text_cols,
+            with status:
+                st.write("🎯 Scoring research directions...")
+            concept_properties: Dict[str, float] = {}
+            all_metrics = bs["all_metrics"]
+            for concept in valid_concepts:
+                values: List[float] = []
+                for idx in concept_abstract_map.get(concept, []):
+                    if idx < len(all_metrics):
+                        for metric_values in all_metrics[idx].values():
+                            values.extend(metric_values)
+                concept_properties[concept] = (
+                    float(np.median(values)) if values else 0.0
+                )
+            X_feat: List[List[float]] = []
+            y_target: List[float] = []
+            for u, v in merged.edges():
+                pu = concept_properties.get(u, 0)
+                pv = concept_properties.get(v, 0)
+                w = merged[u][v].get('weight', 1)
+                X_feat.append([pu, pv, w])
+                y_target.append(
+                    max(pu, pv) * 1.08 if max(pu, pv) > 0 else 0
+                )
+            ridge = None
+            if len(X_feat) > 5:
+                ridge = Ridge(alpha=1.0).fit(
+                    np.array(X_feat), np.array(y_target)
+                )
+            top_scores = compute_research_direction_scores(
+                gnn_model, node_features, final_emb, merged,
+                valid_concepts, concept_properties, ridge, embed_model,
             )
-            drift_df = detect_semantic_drift(
-                df_filtered, valid_concepts,
-                concept_abstract_map, selected_text_cols,
+            del X_feat, y_target, node_features
+            gc.collect()
+
+            with status:
+                st.write("🧪 Distillation + advanced analytics...")
+            distill_df = compute_concept_distillation(
+                valid_concepts, concept_abstract_map, bs["all_texts"],
+                max_docs_per_concept=30,
             )
-            genealogy_df = build_concept_genealogy(
-                merged, valid_concepts, concept_abstract_map,
+            burst_df = None
+            drift_df = None
+            genealogy_df = None
+            bridge_df = None
+            motifs: Dict[str, Any] = {}
+            try:
+                burst_df = detect_keyword_bursts(
+                    df_filtered, valid_concepts,
+                    concept_abstract_map, selected_text_cols,
+                )
+                drift_df = detect_semantic_drift(
+                    df_filtered, valid_concepts,
+                    concept_abstract_map, selected_text_cols,
+                )
+                genealogy_df = build_concept_genealogy(
+                    merged, valid_concepts, concept_abstract_map,
+                )
+                bridge_df = detect_cross_domain_bridges(
+                    merged, valid_concepts, concept_abstract_map,
+                )
+                motifs = analyze_network_motifs(merged)
+            except Exception as e:
+                st.warning(f"Some analytics skipped: {e}")
+            st.session_state.burst_df = burst_df
+            st.session_state.drift_df = drift_df
+            st.session_state.genealogy_df = genealogy_df
+            st.session_state.bridge_df = bridge_df
+            st.session_state.motifs = motifs
+            gc.collect()
+
+            analysis_data = {
+                "valid_concepts": valid_concepts,
+                "concept_to_id": concept_to_id,
+                "id_to_concept": id_to_concept,
+                "concept_abstract_map": concept_abstract_map,
+                "nx_graph": merged,
+                "concept_properties": concept_properties,
+                "ridge": ridge,
+                "top_scores": top_scores,
+                "distill_df": distill_df,
+                "gnn_model": gnn_model,
+                "final_emb": final_emb,
+                "embed_model": embed_model,
+                "all_metrics": bs["all_metrics"],
+                "all_texts": bs["all_texts"],
+                "config": config,
+                "df_filtered": df_filtered,
+                "selected_text_cols": selected_text_cols,
+                "batch_info": {
+                    "mode": "batch",
+                    "batch_size": batch_size,
+                    "total_batches": total_batches,
+                    "total_docs": total_docs,
+                },
+            }
+            if use_ontology:
+                analysis_data.update({
+                    "ontology": ontology,
+                    "resolver": bs["resolver"],
+                    "extractor": bs["extractor"],
+                    "graph_builder": bs["builder"],
+                    "reasoning_paths": (
+                        bs["builder"].reasoning_paths if bs["builder"] else []
+                    ),
+                })
+            st.session_state.analysis_data = analysis_data
+            st.session_state.edit_history = GraphEditHistory()
+            st.session_state.edit_history.save_snapshot(
+                merged, valid_concepts, concept_to_id,
+                id_to_concept, concept_abstract_map,
             )
-            bridge_df = detect_cross_domain_bridges(
-                merged, valid_concepts, concept_abstract_map,
-            )
-            motifs = analyze_network_motifs(merged)
+            bs["all_concepts"] = []
+            bs["valid_doc_indices"] = set()
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            bs["done"] = True
+            bs.pop("finalize_error", None)
+
         except Exception as e:
-            st.warning(f"Some analytics skipped: {e}")
-        st.session_state.burst_df = burst_df
-        st.session_state.drift_df = drift_df
-        st.session_state.genealogy_df = genealogy_df
-        st.session_state.bridge_df = bridge_df
-        st.session_state.motifs = motifs
-        gc.collect()
-
-        analysis_data = {
-            "valid_concepts": valid_concepts,
-            "concept_to_id": concept_to_id,
-            "id_to_concept": id_to_concept,
-            "concept_abstract_map": concept_abstract_map,
-            "nx_graph": merged,
-            "concept_properties": concept_properties,
-            "ridge": ridge,
-            "top_scores": top_scores,
-            "distill_df": distill_df,
-            "gnn_model": gnn_model,
-            "final_emb": final_emb,
-            "embed_model": embed_model,
-            "all_metrics": bs["all_metrics"],
-            "all_texts": bs["all_texts"],
-            "config": config,
-            "df_filtered": df_filtered,
-            "selected_text_cols": selected_text_cols,
-            "batch_info": {
-                "mode": "batch",
-                "batch_size": batch_size,
-                "total_batches": total_batches,
-                "total_docs": total_docs,
-            },
-        }
-        if use_ontology:
-            analysis_data.update({
-                "ontology": ontology,
-                "resolver": bs["resolver"],
-                "extractor": bs["extractor"],
-                "graph_builder": bs["builder"],
-                "reasoning_paths": (
-                    bs["builder"].reasoning_paths if bs["builder"] else []
-                ),
-            })
-        st.session_state.analysis_data = analysis_data
-        st.session_state.edit_history = GraphEditHistory()
-        st.session_state.edit_history.save_snapshot(
-            merged, valid_concepts, concept_to_id,
-            id_to_concept, concept_abstract_map,
-        )
-        bs["all_concepts"] = []
-        bs["valid_doc_indices"] = set()
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        bs["done"] = True
-        bs.pop("finalize_error", None)
-
-    except Exception as e:
-        bs["finalize_error"] = str(e)
-        raise
+            bs["finalize_error"] = str(e)
+            raise
 
     try:
         for b in pending:
@@ -6106,6 +6679,342 @@ def run_batch_analysis(
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+
+
+# ============================================================================
+# qtNER — Quantitative Named Entity Recognition for Nanomaterials
+# ============================================================================
+
+class NanoMetricType(Enum):
+    YIELD_STRENGTH = "yield_strength"          # MPa, GPa
+    UTS = "ultimate_tensile_strength"          # MPa, GPa
+    HARDNESS = "hardness"                      # HV, GPa
+    ELECTRICAL_CONDUCTIVITY = "electrical_cond" # MS/m, %IACS
+    THERMAL_CONDUCTIVITY = "thermal_cond"      # W/mK
+    TWIN_SPACING = "twin_spacing"              # nm
+    GRAIN_SIZE = "grain_size"                  # nm, μm
+    FILM_THICKNESS = "film_thickness"          # nm, μm
+    TEMPERATURE = "temperature"                # K, °C
+
+
+class NanoUnitNormalizer:
+    """Normalizes nanomaterials quantitative units to base SI or common units."""
+    UNIT_CONVERSIONS = {
+        (NanoMetricType.YIELD_STRENGTH, "MPa"): 1.0,
+        (NanoMetricType.YIELD_STRENGTH, "GPa"): 1000.0,
+        (NanoMetricType.YIELD_STRENGTH, "ksi"): 6.895,
+        (NanoMetricType.UTS, "MPa"): 1.0,
+        (NanoMetricType.UTS, "GPa"): 1000.0,
+        (NanoMetricType.HARDNESS, "HV"): 1.0,
+        (NanoMetricType.HARDNESS, "GPa"): 1000.0,
+        (NanoMetricType.HARDNESS, "MPa"): 1.0,
+        (NanoMetricType.ELECTRICAL_CONDUCTIVITY, "MS/m"): 1.0,
+        (NanoMetricType.ELECTRICAL_CONDUCTIVITY, "S/m"): 1e-6,
+        (NanoMetricType.ELECTRICAL_CONDUCTIVITY, "%IACS"): 5.80,  # Approx: 1 %IACS ≈ 5.8 MS/m
+        (NanoMetricType.THERMAL_CONDUCTIVITY, "W/mK"): 1.0,
+        (NanoMetricType.THERMAL_CONDUCTIVITY, "W/m·K"): 1.0,
+        (NanoMetricType.TWIN_SPACING, "nm"): 1.0,
+        (NanoMetricType.TWIN_SPACING, "μm"): 1000.0,
+        (NanoMetricType.TWIN_SPACING, "um"): 1000.0,
+        (NanoMetricType.GRAIN_SIZE, "nm"): 1.0,
+        (NanoMetricType.GRAIN_SIZE, "μm"): 1000.0,
+        (NanoMetricType.GRAIN_SIZE, "um"): 1000.0,
+        (NanoMetricType.FILM_THICKNESS, "nm"): 1.0,
+        (NanoMetricType.FILM_THICKNESS, "μm"): 1000.0,
+        (NanoMetricType.FILM_THICKNESS, "um"): 1000.0,
+        (NanoMetricType.TEMPERATURE, "K"): 1.0,
+        (NanoMetricType.TEMPERATURE, "°C"): 1.0,  # Keep as-is for display
+        (NanoMetricType.TEMPERATURE, "C"): 1.0,
+    }
+
+    @classmethod
+    def normalize(cls, value: float, unit: str, metric_type: NanoMetricType) -> Tuple[float, str]:
+        """Normalize value to base unit. Returns (normalized_value, base_unit)."""
+        unit_upper = unit.strip().upper()
+        key = (metric_type, unit_upper)
+
+        if key in cls.UNIT_CONVERSIONS:
+            conv = cls.UNIT_CONVERSIONS[key]
+            return value * conv, cls._get_base_unit(metric_type)
+
+        # Try case-insensitive match
+        for (mt, u), conv in cls.UNIT_CONVERSIONS.items():
+            if mt == metric_type and u.upper() == unit_upper:
+                return value * conv, cls._get_base_unit(metric_type)
+
+        return value, unit  # No conversion found
+
+    @classmethod
+    def _get_base_unit(cls, metric_type: NanoMetricType) -> str:
+        base_units = {
+            NanoMetricType.YIELD_STRENGTH: "MPa",
+            NanoMetricType.UTS: "MPa",
+            NanoMetricType.HARDNESS: "HV",
+            NanoMetricType.ELECTRICAL_CONDUCTIVITY: "MS/m",
+            NanoMetricType.THERMAL_CONDUCTIVITY: "W/mK",
+            NanoMetricType.TWIN_SPACING: "nm",
+            NanoMetricType.GRAIN_SIZE: "nm",
+            NanoMetricType.FILM_THICKNESS: "nm",
+            NanoMetricType.TEMPERATURE: "K",
+        }
+        return base_units.get(metric_type, "")
+
+
+@dataclass
+class QuantitativeExtraction:
+    metric_type: NanoMetricType
+    raw_value: float
+    raw_unit: str
+    normalized_value: float
+    normalized_unit: str
+    context: str
+    concept: str  # Associated concept from ontology
+
+
+class RegexNanoQuantExtractor:
+    """Regex-based quantitative extractor for nanomaterials literature."""
+
+    METRIC_PATTERNS = {
+        NanoMetricType.YIELD_STRENGTH: [
+            r'yield\s+strength(?:\s+of)?\s+(\d+(?:\.\d+)?)\s*(MPa|GPa|ksi)',
+            r'YS\s*[=:]?\s*(\d+(?:\.\d+)?)\s*(MPa|GPa|ksi)',
+            r'(\d+(?:\.\d+)?)\s*(MPa|GPa|ksi)\s+yield\s+strength',
+        ],
+        NanoMetricType.UTS: [
+            r'ultimate\s+tensile\s+strength(?:\s+of)?\s+(\d+(?:\.\d+)?)\s*(MPa|GPa|ksi)',
+            r'UTS\s*[=:]?\s*(\d+(?:\.\d+)?)\s*(MPa|GPa|ksi)',
+            r'tensile\s+strength(?:\s+of)?\s+(\d+(?:\.\d+)?)\s*(MPa|GPa|ksi)',
+        ],
+        NanoMetricType.HARDNESS: [
+            r'hardness(?:\s+of)?\s+(\d+(?:\.\d+)?)\s*(HV|GPa|MPa)',
+            r'(\d+(?:\.\d+)?)\s*(HV|GPa|MPa)\s*hardness',
+            r'Vickers\s+hardness(?:\s+of)?\s+(\d+(?:\.\d+)?)\s*(HV|GPa|MPa)',
+        ],
+        NanoMetricType.ELECTRICAL_CONDUCTIVITY: [
+            r'electrical\s+conductivity(?:\s+of)?\s+(\d+(?:\.\d+)?)\s*(MS/m|S/m|%IACS)',
+            r'(\d+(?:\.\d+)?)\s*(MS/m|S/m|%IACS)\s*electrical\s+conductivity',
+            r'conductivity(?:\s+of)?\s+(\d+(?:\.\d+)?)\s*(MS/m|S/m|%IACS)',
+        ],
+        NanoMetricType.THERMAL_CONDUCTIVITY: [
+            r'thermal\s+conductivity(?:\s+of)?\s+(\d+(?:\.\d+)?)\s*(W/mK|W/m·K|W/m\s*K)',
+            r'(\d+(?:\.\d+)?)\s*(W/mK|W/m·K|W/m\s*K)\s*thermal\s+conductivity',
+        ],
+        NanoMetricType.TWIN_SPACING: [
+            r'twin\s+(?:boundary\s+)?spacing(?:\s+of)?\s+(\d+(?:\.\d+)?)\s*(nm|μm|um)',
+            r'lamellar\s+spacing(?:\s+of)?\s+(\d+(?:\.\d+)?)\s*(nm|μm|um)',
+            r'(\d+(?:\.\d+)?)\s*(nm|μm|um)\s*twin\s+spacing',
+        ],
+        NanoMetricType.GRAIN_SIZE: [
+            r'grain\s+size(?:\s+of)?\s+(\d+(?:\.\d+)?)\s*(nm|μm|um)',
+            r'grain\s+diameter(?:\s+of)?\s+(\d+(?:\.\d+)?)\s*(nm|μm|um)',
+            r'(\d+(?:\.\d+)?)\s*(nm|μm|um)\s*grain\s+size',
+        ],
+        NanoMetricType.FILM_THICKNESS: [
+            r'film\s+thickness(?:\s+of)?\s+(\d+(?:\.\d+)?)\s*(nm|μm|um)',
+            r'thickness(?:\s+of)?\s+(\d+(?:\.\d+)?)\s*(nm|μm|um)',
+            r'(\d+(?:\.\d+)?)\s*(nm|μm|um)\s*thick',
+        ],
+        NanoMetricType.TEMPERATURE: [
+            r'(\d+(?:\.\d+)?)\s*(°C|C|K)',
+            r'temperature(?:\s+of)?\s+(\d+(?:\.\d+)?)\s*(°C|C|K)',
+            r'annealed\s+at\s+(\d+(?:\.\d+)?)\s*(°C|C|K)',
+        ],
+    }
+
+    CONCEPT_ASSOCIATIONS = {
+        NanoMetricType.YIELD_STRENGTH: ["yield_strength", "nanotwinned_copper", "defect_engineered_ag"],
+        NanoMetricType.UTS: ["ultimate_tensile_strength", "nanotwinned_copper"],
+        NanoMetricType.HARDNESS: ["hardness", "core_shell_cuag", "defect_engineered_ag"],
+        NanoMetricType.ELECTRICAL_CONDUCTIVITY: ["electrical_conductivity", "nanotwinned_copper", "core_shell_cuag"],
+        NanoMetricType.THERMAL_CONDUCTIVITY: ["thermal_conductivity", "core_shell_cuag"],
+        NanoMetricType.TWIN_SPACING: ["twin_boundary", "coherent_twin_boundary", "nanotwinned_copper"],
+        NanoMetricType.GRAIN_SIZE: ["grain_boundary", "nanotwinned_copper"],
+        NanoMetricType.FILM_THICKNESS: ["thin_film", "nanotwinned_copper"],
+        NanoMetricType.TEMPERATURE: ["annealing", "thermal_stability"],
+    }
+
+    def __init__(self, ontology: DomainOntology = None):
+        self.ontology = ontology
+        self.compiled_patterns = {}
+        for metric_type, patterns in self.METRIC_PATTERNS.items():
+            self.compiled_patterns[metric_type] = [re.compile(p, re.IGNORECASE) for p in patterns]
+
+    def extract_from_text(self, text: str, doc_id: int = 0) -> List[QuantitativeExtraction]:
+        """Extract quantitative metrics from text."""
+        extractions = []
+
+        for metric_type, patterns in self.compiled_patterns.items():
+            for pattern in patterns:
+                for match in pattern.finditer(text):
+                    groups = match.groups()
+                    if len(groups) >= 2:
+                        try:
+                            value = float(groups[0])
+                            unit = groups[1]
+
+                            # Normalize
+                            norm_value, norm_unit = NanoUnitNormalizer.normalize(value, unit, metric_type)
+
+                            # Get context
+                            start = max(0, match.start() - 80)
+                            end = min(len(text), match.end() + 80)
+                            context = text[start:end].replace("\n", " ")
+
+                            # Associate concept
+                            concept = self._associate_concept(context, metric_type)
+
+                            extractions.append(QuantitativeExtraction(
+                                metric_type=metric_type,
+                                raw_value=value,
+                                raw_unit=unit,
+                                normalized_value=norm_value,
+                                normalized_unit=norm_unit,
+                                context=context,
+                                concept=concept
+                            ))
+                        except (ValueError, IndexError):
+                            continue
+
+        return extractions
+
+    def _associate_concept(self, context: str, metric_type: NanoMetricType) -> str:
+        """Associate extraction with an ontology concept based on context."""
+        context_lower = context.lower()
+        candidates = self.CONCEPT_ASSOCIATIONS.get(metric_type, [])
+
+        for concept in candidates:
+            if concept.replace("_", " ") in context_lower:
+                return concept
+            if self.ontology and concept in self.ontology.concepts:
+                for syn in self.ontology.concepts[concept].synonyms:
+                    if syn in context_lower:
+                        return concept
+
+        return candidates[0] if candidates else "general"
+
+    def extract_from_corpus(self, texts: Union[List[str], Dict[int, str]], 
+                           ontology: DomainOntology = None) -> pd.DataFrame:
+        """Extract metrics from a corpus of texts."""
+        if ontology:
+            self.ontology = ontology
+
+        all_extractions = []
+        if isinstance(texts, dict):
+            items = texts.items()
+        else:
+            items = enumerate(texts)
+
+        for doc_id, text in items:
+            if not isinstance(text, str):
+                continue
+            exts = self.extract_from_text(text, doc_id)
+            for ext in exts:
+                all_extractions.append({
+                    "doc_id": doc_id,
+                    "metric_type": ext.metric_type.value,
+                    "raw_value": ext.raw_value,
+                    "raw_unit": ext.raw_unit,
+                    "normalized_value": ext.normalized_value,
+                    "normalized_unit": ext.normalized_unit,
+                    "concept": ext.concept,
+                    "context": ext.context[:200],
+                })
+
+        return pd.DataFrame(all_extractions)
+
+
+def render_quantitative_nano_tab():
+    """Render the Quantitative NER tab."""
+    st.subheader("🔢 Quantitative NER (qtNER)")
+    st.markdown("Extract and normalize nanomaterials-specific quantitative descriptors.")
+
+    analysis_data = st.session_state.get("analysis_data")
+    if analysis_data is None:
+        st.warning("No analysis data available. Build the graph first.")
+        return
+
+    all_texts = analysis_data.get("all_texts", {})
+    ontology = analysis_data.get("ontology")
+
+    if not all_texts:
+        st.info("No text corpus available for extraction.")
+        return
+
+    extractor = RegexNanoQuantExtractor(ontology)
+
+    with st.spinner("Extracting quantitative metrics..."):
+        df = extractor.extract_from_corpus(all_texts, ontology)
+
+    if df.empty:
+        st.info("No quantitative metrics found in the current corpus.")
+        return
+
+    st.success(f"Extracted **{len(df)}** quantitative measurements")
+
+    # Filters
+    col1, col2 = st.columns(2)
+    with col1:
+        selected_metrics = st.multiselect(
+            "Filter by metric type:",
+            options=sorted(df["metric_type"].unique()),
+            default=sorted(df["metric_type"].unique())[:3]
+        )
+    with col2:
+        selected_concepts = st.multiselect(
+            "Filter by concept:",
+            options=sorted(df["concept"].unique()),
+            default=sorted(df["concept"].unique())[:5]
+        )
+
+    filtered_df = df
+    if selected_metrics:
+        filtered_df = filtered_df[filtered_df["metric_type"].isin(selected_metrics)]
+    if selected_concepts:
+        filtered_df = filtered_df[filtered_df["concept"].isin(selected_concepts)]
+
+    # Display table
+    st.markdown("### Extracted Measurements")
+    st.dataframe(filtered_df, use_container_width=True)
+
+    # Summary statistics by metric type
+    st.markdown("### Summary Statistics by Metric Type")
+    summary = filtered_df.groupby("metric_type").agg({
+        "normalized_value": ["count", "mean", "std", "min", "max"]
+    }).round(3)
+    summary.columns = ["Count", "Mean", "Std", "Min", "Max"]
+    st.dataframe(summary, use_container_width=True)
+
+    # Distribution plots
+    st.markdown("### Value Distributions")
+    for metric_type in selected_metrics if selected_metrics else df["metric_type"].unique()[:3]:
+        metric_df = filtered_df[filtered_df["metric_type"] == metric_type]
+        if len(metric_df) > 0:
+            fig = px.histogram(
+                metric_df, x="normalized_value",
+                title=f"{metric_type.replace('_', ' ').title()} Distribution",
+                labels={"normalized_value": f"Value ({metric_df['normalized_unit'].iloc[0]})"},
+                color="concept",
+                nbins=20
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+    # Concept-metric linkage
+    st.markdown("### Concept-Metric Linkage")
+    linkage = filtered_df.groupby(["concept", "metric_type"]).agg({
+        "normalized_value": ["mean", "count"]
+    }).round(2)
+    linkage.columns = ["Mean Value", "Count"]
+    linkage = linkage.reset_index()
+    st.dataframe(linkage, use_container_width=True)
+
+    # Export
+    csv = df.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        "📥 Download Extracted Metrics (CSV)",
+        data=csv,
+        file_name="nanomat_quantitative_metrics.csv",
+        mime="text/csv"
+    )
 
 
 # ============================================================================
@@ -7122,14 +8031,128 @@ class LocalLLMQueryAnalyzer(LLMQueryAnalyzer):
                 torch.cuda.empty_cache()
         return FallbackAnalyzer().analyze_query(query, ontology)
 
+# ============================================================================
+# OLLAMA LLM BACKEND (Local High-Capacity Reasoning)
+# ============================================================================
+import requests
+import os
+
+class OllamaQueryAnalyzer(LLMQueryAnalyzer):
+    """Ollama-backed query analyzer for local, high-capacity reasoning."""
+    OLLAMA_URL = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+
+    def __init__(self, model_name: str, ontology: Any = None):
+        self.model_name = model_name
+        self.ontology = ontology
+        self._pending_new_concepts = []
+        self._pending_new_relationships = []
+
+    def is_available(self) -> bool:
+        try:
+            r = requests.get(f"{self.OLLAMA_URL}/api/tags", timeout=3)
+            return r.status_code == 200
+        except Exception:
+            return False
+
+    def _map_to_result(self, parsed: Dict, query: str, ontology: Any) -> QueryAnalysisResult:
+        """Map Ollama JSON response to QueryAnalysisResult."""
+        problem_map = {p.value: p for p in NanoCoreProblem}
+        primary = problem_map.get(parsed.get("primary_problem", "general"), NanoCoreProblem.GENERAL)
+        explicitly_mentioned = [c for c in parsed.get("explicitly_mentioned", []) if c in ontology.concepts]
+        inferred = [c for c in parsed.get("inferred_concepts", []) if c in ontology.concepts and c not in explicitly_mentioned]
+        all_relevant = list(dict.fromkeys(explicitly_mentioned + inferred))
+
+        priorities = {}
+        for concept in all_relevant:
+            is_explicit = concept in explicitly_mentioned
+            priorities[concept] = ConceptPriority(
+                concept_name=concept,
+                concept_type=ontology.get_concept_type(concept).value,
+                composite_score=0.9 if is_explicit else 0.6,
+                direct_score=1.0 if is_explicit else 0.5,
+                problem_affinity_score=0.8,
+                causal_path_score=0.5,
+                is_explicitly_mentioned=is_explicit,
+                is_inferred=not is_explicit,
+                inference_reason="ollama_inferred" if not is_explicit else "explicit_mention"
+            )
+
+        query_type = parsed.get("query_type", "general")
+        highlight_paths = [[p[0], p[1]] for p in parsed.get("highlight_paths", []) if len(p) >= 2]
+
+        return QueryAnalysisResult(
+            original_query=query,
+            normalized_query=query.lower().strip(),
+            primary_problem=primary,
+            secondary_problems=[],
+            problem_confidences={},
+            explicitly_mentioned=explicitly_mentioned,
+            inferred_concepts=inferred,
+            all_relevant_concepts=all_relevant,
+            concept_priorities=priorities,
+            query_type=query_type,
+            emphasis_direction="cause" if query_type == "causal" else "neutral",
+            subgraph_depth=2,
+            priority_threshold=0.3,
+            focus_nodes=explicitly_mentioned[:5],
+            bridge_nodes=inferred[:3],
+            suggested_layout="force",
+            highlight_paths=highlight_paths,
+            visualization_focus=NANO_PROBLEM_DEFINITIONS[primary].visualization_focus,
+            reasoning_chain=parsed.get("reasoning_chain", ["Ollama analysis completed"]),
+            confidence=parsed.get("confidence", 0.75)
+        )
+
+    def analyze_query(self, query: str, ontology: Any) -> QueryAnalysisResult:
+        system_prompt = """You are an expert in Nanomaterials (nt-Cu, Cu@Ag, def-Ag). 
+Analyze the query and return ONLY valid JSON with: 
+- primary_problem: one of [twin_engineering, defect_optimization, interface_design, thermal_stability, strength_ductility, conductivity, general, multi_problem]
+- explicitly_mentioned: list of canonical concept names (snake_case) from the query
+- inferred_concepts: list of additional relevant concepts implied by the query
+- query_type: one of [causal, comparison, solution, definition, general]
+- highlight_paths: list of [source, target] concept pairs to highlight
+- reasoning_chain: list of strings explaining your analysis
+- confidence: float between 0 and 1"""
+
+        concept_list = list(ontology.concepts.keys())[:50]
+        payload = {
+            "model": self.model_name,
+            "prompt": f"Query: {query}\nConcepts: {concept_list}\nJSON:",
+            "system": system_prompt,
+            "format": "json",
+            "stream": False,
+            "options": {"temperature": 0.2, "num_predict": 1024}
+        }
+        try:
+            response = requests.post(
+                f"{self.OLLAMA_URL}/api/generate", 
+                json=payload, 
+                timeout=120
+            )
+            response.raise_for_status()
+            raw_response = response.json().get("response", "")
+            parsed = json.loads(raw_response)
+            self._pending_new_concepts = parsed.get("new_concepts", [])
+            self._pending_new_relationships = parsed.get("new_relationships", [])
+            return self._map_to_result(parsed, query, ontology)
+        except Exception as e:
+            st.warning(f"Ollama failed: {e}. Falling back to rule-based analyzer.")
+            return FallbackAnalyzer().analyze_query(query, ontology)
+
 class LLMQueryAnalyzerFactory:
     def __init__(self):
         self._openai_cache: Optional[OpenAIQueryAnalyzer] = None
         self._local_cache: Dict[str, LocalLLMQueryAnalyzer] = {}
+        self._ollama_cache: Optional[OllamaQueryAnalyzer] = None
         self._fallback = FallbackAnalyzer()
 
-    def get_analyzer(self, mode: str = "auto", api_key: str = None, local_model: str = None) -> LLMQueryAnalyzer:
-        if mode == "openai":
+    def get_analyzer(self, mode: str = "auto", api_key: str = None, local_model: str = None, ollama_model: str = None) -> LLMQueryAnalyzer:
+        if mode == "ollama":
+            if self._ollama_cache is None:
+                model = ollama_model or "qwen2.5:7b"
+                self._ollama_cache = OllamaQueryAnalyzer(model)
+            return self._ollama_cache
+        elif mode == "openai":
             if self._openai_cache is None:
                 self._openai_cache = OpenAIQueryAnalyzer(api_key=api_key)
             return self._openai_cache
@@ -7143,6 +8166,11 @@ class LLMQueryAnalyzerFactory:
         elif mode == "fallback":
             return self._fallback
         else:  # auto
+            # Try Ollama first
+            if self._ollama_cache is None and ollama_model:
+                self._ollama_cache = OllamaQueryAnalyzer(ollama_model)
+            if self._ollama_cache and self._ollama_cache.is_available():
+                return self._ollama_cache
             if self._openai_cache is None:
                 self._openai_cache = OpenAIQueryAnalyzer(api_key=api_key)
             if self._openai_cache.is_available():
@@ -7657,7 +8685,7 @@ def render_llm_qa_tab(analysis_data: Dict, ontology: Any):
 
     col1, col2 = st.columns([3, 1])
     with col1: query = st.text_input("Enter your nanomaterials research question:", placeholder="e.g., How does twin boundary spacing affect strength and conductivity?")
-    with col2: mode = st.selectbox("Engine", ["auto", "openai", "local", "fallback"], index=0)
+    with col2: mode = st.selectbox("Engine", ["auto", "ollama", "openai", "local", "fallback"], index=0)
         
     if st.button("🔍 Analyze & Answer", type="primary"):
         if not query.strip(): st.warning("Please enter a query."); return
@@ -7773,6 +8801,11 @@ def main() -> None:
     if 'ontology' not in st.session_state:
         st.session_state.ontology = DomainOntology()
     ontology = st.session_state.ontology
+
+    # Initialize QDWA Engine
+    embed_model_qdwa = load_embedding_model()
+    if "nano_qdwa_engine" not in st.session_state:
+        st.session_state.nano_qdwa_engine = NanoQDWAEngine(ontology, embed_model_qdwa)
 
     # Initialize LLM Q&A session state
     if 'qa_factory' not in st.session_state:
@@ -8279,13 +9312,13 @@ def main() -> None:
 
         has_reasoning = "ontology" in data
         tab_names = [
-            "📊 Visualization", "🧪 Distillation", "🎯 Research Directions",
-            "✅ Validation", "📥 Export", "📈 Extra Viz",
-            "🔬 Advanced Analytics",
+            "📊 Visualization", "⚖️ QDWA Weights", "🧪 Distillation", 
+            "🎯 Research Directions", "✅ Validation", "📥 Export", 
+            "📈 Extra Viz", "🔬 Advanced Analytics", "🧠 Reasoning Dashboard",
+            "🧠 Microtransformer KG-RAG", "🤖 LLM-Guided Q&A", "🔢 Quantitative NER"
         ]
-        if has_reasoning:
-            tab_names.append("🧠 Reasoning Dashboard")
-        tab_names.append("🤖 LLM-Guided Q&A")
+        if not has_reasoning:
+            tab_names.remove("🧠 Reasoning Dashboard")
         tabs = st.tabs(tab_names)
         tab_idx = 0
 
@@ -8409,6 +9442,11 @@ def main() -> None:
                 render_radar_chart(
                     distill_df, top_k=radar_k, cmap_name=cmap, theme=theme,
                 )
+
+        # Tab 1: QDWA Weights
+        tab_idx += 1
+        with tabs[tab_idx]:
+            render_nano_qdwa_tab()
 
         tab_idx += 1
         with tabs[tab_idx]:
@@ -8810,6 +9848,14 @@ def main() -> None:
                         "Rebuild graph with ontology enabled."
                     )
 
+        # Tab 9: Microtransformer KG-RAG
+        tab_idx += 1
+        with tabs[tab_idx]:
+            if st.session_state.analysis_data is not None and "ontology" in st.session_state.analysis_data:
+                render_microtransformer_kg_rag_tab(st.session_state.analysis_data, st.session_state.analysis_data["ontology"])
+            else:
+                st.info("Please build the concept graph with ontology enabled first.")
+
         # LLM-Guided Q&A Tab
         tab_idx += 1
         with tabs[tab_idx]:
@@ -8817,6 +9863,11 @@ def main() -> None:
                 render_llm_qa_tab(st.session_state.analysis_data, st.session_state.analysis_data["ontology"])
             else:
                 st.info("Please build the concept graph with ontology enabled first.")
+
+        # qtNER Tab
+        tab_idx += 1
+        with tabs[tab_idx]:
+            render_quantitative_nano_tab()
 
 
 if __name__ == "__main__":
