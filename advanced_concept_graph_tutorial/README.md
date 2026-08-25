@@ -10,3 +10,6 @@ The qdwa module is implemented in v100 module
 
 [![integratedllmgraphnanomaterials](https://img.shields.io/badge/nanoqdwacg-v100-yellow)](https://nanomaterials-qdwa-concept-graph.streamlit.app/) (Options of query-distilled and weight allocation guided concept graph and default entirety analysis concept graph, Customizable nodes in the Concept Graph, microtransformer)
 
+[![integratedllmgraphnanomaterials](https://img.shields.io/badge/nanoqdwacg-v1000-yellow)](https://nanomaterials-qdwa-concept-graph1000.streamlit.app/) (Options of query-distilled and weight allocation guided concept graph and default entirety analysis concept graph, Customizable nodes in the Concept Graph, microtransformer)
+
+
