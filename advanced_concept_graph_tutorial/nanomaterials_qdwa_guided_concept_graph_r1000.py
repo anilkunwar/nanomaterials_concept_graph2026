@@ -490,23 +490,27 @@ def apply_sampling(df: pd.DataFrame, preset_name: str,
     metadata["sampled_count"] = len(sampled)
     return sampled.reset_index(drop=True), metadata
 
-def render_sampling_panel() -> Tuple[str, Optional[Union[float, int, str]]]:
+def render_sampling_panel(key_prefix: str = "sampling") -> Tuple[str, Optional[Union[float, int, str]]]:
     st.sidebar.markdown("#### 📊 Data Sampling")
     preset_names = list(SAMPLING_PRESETS.keys()) + ["Custom"]
     selected_preset = st.sidebar.selectbox("Sampling method:", options=preset_names,
-                                           index=2, key="sampling_preset_select")
+                                           index=2, key=f"{key_prefix}_preset_select")
     custom_value = None
     if selected_preset == "Custom":
         col1, col2 = st.sidebar.columns(2)
         with col1:
-            custom_type = st.radio("Type:", ["Percentage", "Count", "Stratified Col"], horizontal=True)
+            custom_type = st.radio("Type:", ["Percentage", "Count", "Stratified Col"],
+                                   horizontal=True, key=f"{key_prefix}_custom_type")
         with col2:
             if custom_type == "Percentage":
-                custom_value = st.slider("% of data:", 1, 100, 50) / 100
+                custom_value = st.slider("% of data:", 1, 100, 50,
+                                         key=f"{key_prefix}_custom_pct") / 100
             elif custom_type == "Count":
-                custom_value = st.number_input("N records:", min_value=1, max_value=100000, value=100)
+                custom_value = st.number_input("N records:", min_value=1, max_value=100000,
+                                               value=100, key=f"{key_prefix}_custom_n")
             else:
-                custom_value = st.selectbox("Stratify by:", options=["Year", "_source_file"])
+                custom_value = st.selectbox("Stratify by:", options=["Year", "_source_file"],
+                                            key=f"{key_prefix}_strat_col")
     st.session_state["sampling_preset"] = selected_preset
     return selected_preset, custom_value
 
@@ -6332,7 +6336,7 @@ def render_sidebar() -> None:
         render_viz_customization_panel()
 
         # --- Data Sampling (Block 3) ---
-        render_sampling_panel()
+        render_sampling_panel("sidebar")
 
         # --- Environment Badge ---
         env, details = detect_environment()
@@ -9286,7 +9290,7 @@ def main() -> None:
         st.write(list(df_filtered.columns))
 
     # --- Apply Sampling (Block 3) ---
-    sampling_preset, custom_val = render_sampling_panel()
+    sampling_preset, custom_val = render_sampling_panel("main")
     if sampling_preset:
         df_filtered, sampling_meta = apply_sampling(df_filtered, sampling_preset, custom_val)
         st.caption(f"Sampled: {sampling_meta['sampled_count']}/{sampling_meta['original_count']} ({sampling_meta['strategy']})")
