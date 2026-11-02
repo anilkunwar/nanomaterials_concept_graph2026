@@ -2830,36 +2830,184 @@ class NanoQDWAEngine:
 # ============================================================================
 # QDWA & MICROTRANSFORMER PUBLICATION-Quality STYLING ENGINE
 # ============================================================================
+# 60+ colormaps (matplotlib names → converted to Plotly hex scales)
+QDWA_CMAP_CHOICES: List[str] = [
+    "viridis", "plasma", "inferno", "magma", "cividis", "turbo",
+    "jet", "rainbow", "hsv", "nipy_spectral", "gist_rainbow", "cubehelix",
+    "coolwarm", "RdBu", "RdBu_r", "seismic", "Spectral", "Spectral_r",
+    "RdYlBu", "RdYlBu_r", "RdYlGn", "RdYlGn_r", "coolwarm_r",
+    "tab10", "tab20", "tab20b", "tab20c", "Accent", "Dark2",
+    "Paired", "Pastel1", "Pastel2", "Set1", "Set2", "Set3",
+    "bone", "gray", "pink", "spring", "summer", "autumn", "winter",
+    "cool", "hot", "twilight", "twilight_shifted", "copper", "afmhot",
+    "YlOrRd", "OrRd", "PuRd", "RdPu", "BuPu", "GnBu", "YlGnBu",
+    "PuBuGn", "BuGn", "YlGn", "Greys", "gist_earth", "terrain", "ocean",
+    "Blues", "Reds", "Greens", "Purples", "Oranges",
+]
+
+QDWA_FONT_CHOICES: List[str] = [
+    "Inter, Segoe UI, Roboto, sans-serif",
+    "Arial, Helvetica, sans-serif",
+    "Helvetica, Arial, sans-serif",
+    "Georgia, serif",
+    "Times New Roman, Times, serif",
+    "Courier New, Courier, monospace",
+    "Roboto Mono, monospace",
+    "Tahoma, Geneva, sans-serif",
+    "Verdana, Geneva, sans-serif",
+    "Trebuchet MS, sans-serif",
+]
+
 def plotly_continuous_scale(cmap_key: str, n: int = 256) -> List[str]:
     """Return a list of hex colors from a matplotlib colormap for Plotly."""
     return get_colormap_colors(cmap_key, n)
 
+def _qget(key: str, default: Any) -> Any:
+    """Get a QDWA customization value with a default."""
+    return st.session_state.get(key, default)
+
+def _qdwa_inline_panel(
+    fig_id: str,
+    fig_label: str,
+    show_cmap: bool = True,
+    show_axes: bool = True,
+    show_size: bool = True,
+    show_lines: bool = True,
+    show_annotation: bool = False,
+) -> Dict[str, Any]:
+    """
+    Render an inline customization panel for a single QDWA figure.
+
+    Returns a dict of resolved style values that the caller can apply
+    to the figure. Every key is namespaced under ``fig_id`` so multiple
+    figures on the same tab do not collide.
+    """
+    cfg: Dict[str, Any] = {}
+    with st.expander(f"🎨 Customize “{fig_label}” — colormaps, fonts, sizes, axes, lines", expanded=False):
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            cfg["font_family"] = st.selectbox(
+                "Font family", QDWA_FONT_CHOICES,
+                index=QDWA_FONT_CHOICES.index(_qget(f"{fig_id}_font", QDWA_FONT_CHOICES[0])),
+                key=f"{fig_id}_font",
+            )
+            cfg["title_size"] = st.slider("Title font size", 10, 36, _qget(f"{fig_id}_title_size", 16), key=f"{fig_id}_title_size")
+            cfg["label_size"] = st.slider("Axis-label font size", 8, 24, _qget(f"{fig_id}_label_size", 13), key=f"{fig_id}_label_size")
+            cfg["tick_size"]  = st.slider("Tick font size", 6, 22, _qget(f"{fig_id}_tick_size",  11), key=f"{fig_id}_tick_size")
+        with c2:
+            if show_cmap:
+                default_cm = _qget(f"{fig_id}_cmap", "viridis")
+                default_idx = QDWA_CMAP_CHOICES.index(default_cm) if default_cm in QDWA_CMAP_CHOICES else 0
+                cfg["cmap"] = st.selectbox(
+                    f"Colormap ({len(QDWA_CMAP_CHOICES)} options)",
+                    options=QDWA_CMAP_CHOICES, index=default_idx,
+                    key=f"{fig_id}_cmap",
+                    help="Includes viridis, plasma, inferno, magma, turbo, jet, rainbow, coolwarm, Spectral, tab20, and many more.",
+                )
+                cfg["cmap_reverse"] = st.checkbox("Reverse colormap", value=_qget(f"{fig_id}_cmap_rev", False), key=f"{fig_id}_cmap_rev")
+            else:
+                cfg["cmap"] = None
+                cfg["cmap_reverse"] = False
+            if show_size:
+                cfg["width"]  = st.slider("Figure width (px)",  400, 1600, _qget(f"{fig_id}_width",  900), 50, key=f"{fig_id}_width")
+                cfg["height"] = st.slider("Figure height (px)", 300, 1200, _qget(f"{fig_id}_height", 480), 50, key=f"{fig_id}_height")
+            else:
+                cfg["width"] = cfg["height"] = None
+        with c3:
+            if show_axes:
+                cfg["x_title"] = st.text_input("X-axis title", value=_qget(f"{fig_id}_x_title", ""), key=f"{fig_id}_x_title", placeholder="(auto)")
+                cfg["y_title"] = st.text_input("Y-axis title", value=_qget(f"{fig_id}_y_title", ""), key=f"{fig_id}_y_title", placeholder="(auto)")
+                cfg["tick_angle"] = st.slider("X-tick angle (°)", 0, 90, _qget(f"{fig_id}_tick_angle", 0), 5, key=f"{fig_id}_tick_angle")
+                cfg["tick_len"]   = st.slider("Tick length", 0, 20, _qget(f"{fig_id}_tick_len",   5), 1, key=f"{fig_id}_tick_len")
+                cfg["show_grid"]  = st.checkbox("Show gridlines", value=_qget(f"{fig_id}_show_grid", True), key=f"{fig_id}_show_grid")
+            if show_lines:
+                cfg["line_width"] = st.slider("Line / border thickness", 0.5, 8.0, _qget(f"{fig_id}_line_width", 2.0), 0.25, key=f"{fig_id}_line_width")
+                cfg["line_color"] = st.color_picker("Line / border color", value=_qget(f"{fig_id}_line_color", "#1f2937"), key=f"{fig_id}_line_color")
+        with c4:
+            cfg["bg_color"]    = st.color_picker("Plot background",  value=_qget(f"{fig_id}_bg_color",    "#ffffff"), key=f"{fig_id}_bg_color")
+            cfg["paper_color"] = st.color_picker("Paper background", value=_qget(f"{fig_id}_paper_color", "#ffffff"), key=f"{fig_id}_paper_color")
+            cfg["grid_color"]  = st.color_picker("Gridline color",   value=_qget(f"{fig_id}_grid_color",  "#e5e7eb"), key=f"{fig_id}_grid_color")
+            cfg["text_color"]  = st.color_picker("Text color",       value=_qget(f"{fig_id}_text_color",  "#0f172a"), key=f"{fig_id}_text_color")
+            if show_annotation:
+                cfg["anno_size"]  = st.slider("Annotation (cell-label) size", 6, 22, _qget(f"{fig_id}_anno_size", 12), 1, key=f"{fig_id}_anno_size")
+                cfg["anno_color"] = st.color_picker("Annotation color", value=_qget(f"{fig_id}_anno_color", "#000000"), key=f"{fig_id}_anno_color")
+            if show_lines:
+                cfg["boundary_width"] = st.slider("Cell / boundary line width", 0.0, 6.0, _qget(f"{fig_id}_bwidth", 1.0), 0.25, key=f"{fig_id}_bwidth")
+                cfg["boundary_color"] = st.color_picker("Boundary line color", value=_qget(f"{fig_id}_bcolor", "#ffffff"), key=f"{fig_id}_bcolor")
+        if st.button("🔄 Reset this figure", key=f"{fig_id}_reset"):
+            for k in list(st.session_state.keys()):
+                if k.startswith(f"{fig_id}_"):
+                    del st.session_state[k]
+            st.rerun()
+    return cfg
+
+
+def _apply_inline_style(fig, cfg: Dict[str, Any], is_axial: bool = True) -> go.Figure:
+    """Apply settings from `_qdwa_inline_panel` to a Plotly figure."""
+    font = cfg.get("font_family", "Inter, sans-serif")
+    fig.update_layout(
+        font=dict(family=font, size=cfg.get("tick_size", 11), color=cfg.get("text_color", "#0f172a")),
+        title_font=dict(family=font, size=cfg.get("title_size", 16), color=cfg.get("text_color", "#0f172a")),
+        paper_bgcolor=cfg.get("paper_color", "#ffffff"),
+        plot_bgcolor=cfg.get("bg_color", "#ffffff"),
+    )
+    if cfg.get("width") and cfg.get("height"):
+        fig.update_layout(width=int(cfg["width"]), height=int(cfg["height"]))
+    if is_axial:
+        ax_kw = dict(
+            tickfont=dict(size=cfg.get("tick_size", 11), family=font, color=cfg.get("text_color", "#0f172a")),
+            ticklen=cfg.get("tick_len", 5),
+            showgrid=cfg.get("show_grid", True),
+            gridcolor=cfg.get("grid_color", "#e5e7eb"),
+            gridwidth=1,
+            zeroline=False,
+            linecolor=cfg.get("line_color", "#1f2937"),
+            linewidth=cfg.get("line_width", 1.5),
+        )
+        fig.update_xaxes(**ax_kw)
+        fig.update_yaxes(**ax_kw)
+        if cfg.get("tick_angle"):
+            fig.update_xaxes(tickangle=cfg["tick_angle"])
+        if cfg.get("x_title"):
+            fig.update_xaxes(title_text=cfg["x_title"], title_font=dict(size=cfg.get("label_size", 13), family=font, color=cfg.get("text_color", "#0f172a")))
+        if cfg.get("y_title"):
+            fig.update_yaxes(title_text=cfg["y_title"], title_font=dict(size=cfg.get("label_size", 13), family=font, color=cfg.get("text_color", "#0f172a")))
+    return fig
+
+
+def _resolve_scale(cfg: Dict[str, Any]) -> List[str]:
+    """Return a Plotly-compatible colorscale list from cfg, honoring reverse."""
+    cmap = cfg.get("cmap") or "viridis"
+    colors = plotly_continuous_scale(cmap, 256)
+    if cfg.get("cmap_reverse"):
+        colors = list(reversed(colors))
+    return colors
+
+
+# Backward-compatible global panel (kept so render_advanced_microtransformer_tab still works)
 def render_qdwa_customization_panel():
-    """Publication-quality customization panel for QDWA & Microtransformer charts."""
-    with st.expander("🎨 Publication-Quality Customization (50+ Colormaps, Fonts, Layout)", expanded=False):
+    """Global publication-quality customization panel (legacy entry point)."""
+    with st.expander("🎨 Global Publication-Quality Customization (60+ Colormaps, Fonts, Layout)", expanded=False):
         c1, c2, c3 = st.columns(3)
         with c1:
-            cmaps = list(SUPPORTED_COLORMAPS.keys())
-            default_idx = cmaps.index(st.session_state.get("qdwa_cmap", "viridis")) if st.session_state.get("qdwa_cmap", "viridis") in cmaps else 0
-            st.selectbox("Colormap (50+ Options)", options=cmaps, index=default_idx,
-                         key="qdwa_cmap", help="Sequential colormaps like viridis/inferno are best for heatmaps.")
-            st.selectbox("Font Family",
-                         ["Inter, Segoe UI, Roboto, sans-serif", "Arial, Helvetica, sans-serif", 
-                          "Georgia, serif", "Times New Roman, serif", "Courier New, monospace"],
-                         index=0, key="qdwa_font")
-            st.slider("Title Font Size", 12, 32, 18, key="qdwa_title_size")
+            default_cm = st.session_state.get("qdwa_cmap", "viridis")
+            default_idx = QDWA_CMAP_CHOICES.index(default_cm) if default_cm in QDWA_CMAP_CHOICES else 0
+            st.selectbox("Colormap (60+ Options)", options=QDWA_CMAP_CHOICES, index=default_idx,
+                         key="qdwa_cmap", help="Includes viridis, plasma, inferno, magma, turbo, jet, rainbow, coolwarm, Spectral, tab20, etc.")
+            st.selectbox("Font Family", QDWA_FONT_CHOICES, index=0, key="qdwa_font")
+            st.slider("Title Font Size", 12, 36, 18, key="qdwa_title_size")
         with c2:
             st.slider("Tick/Label Font Size", 8, 24, 12, key="qdwa_tick_size")
-            st.slider("Line/Border Thickness", 0.5, 5.0, 1.5, step=0.5, key="qdwa_line_width")
-            st.slider("Tick Length", 0, 15, 5, key="qdwa_tick_len")
+            st.slider("Line/Border Thickness", 0.5, 8.0, 1.5, step=0.25, key="qdwa_line_width")
+            st.slider("Tick Length", 0, 20, 5, key="qdwa_tick_len")
         with c3:
-            st.slider("Top Margin (px)", 20, 100, 50, key="qdwa_margin_t")
-            st.slider("Bottom Margin (px)", 20, 100, 40, key="qdwa_margin_b")
-            st.slider("Left Margin (px)", 20, 150, 60, key="qdwa_margin_l")
-            st.slider("Right Margin (px)", 20, 150, 40, key="qdwa_margin_r")
+            st.slider("Top Margin (px)", 20, 120, 50, key="qdwa_margin_t")
+            st.slider("Bottom Margin (px)", 20, 120, 40, key="qdwa_margin_b")
+            st.slider("Left Margin (px)", 20, 180, 60, key="qdwa_margin_l")
+            st.slider("Right Margin (px)", 20, 180, 40, key="qdwa_margin_r")
 
 def apply_qdwa_pub_style(fig, is_axial=True):
-    """Applies session-state styling to Plotly figures for publication quality."""
+    """Legacy styling function — preserved for the Microtransformer tab."""
     font = st.session_state.get("qdwa_font", "Inter, sans-serif")
     title_size = st.session_state.get("qdwa_title_size", 18)
     tick_size = st.session_state.get("qdwa_tick_size", 12)
@@ -2896,58 +3044,149 @@ def render_qdwa_math_trace(analysis: QDWAAnalysis, theme: Dict[str, str] = None)
         st.caption(f"c = {c:.4f} → K = {K}")
 def render_qdwa_sankey(analysis: QDWAAnalysis, theme: Dict[str, str] = None):
     st.markdown("### 🌊 QDWA Sankey: Query → Terms → Categories")
+    cfg = _qdwa_inline_panel("qdwa_sankey", "Sankey — Query → Terms → Categories",
+                             show_cmap=False, show_axes=False, show_size=True,
+                             show_lines=True, show_annotation=False)
     labels, sources, targets, values, colors = [], [], [], [], []
     labels.append("Query"); colors.append("#636efa")
     term_indices = {}
+    n_terms = max(len(analysis.term_memberships), 1)
     for term in analysis.term_memberships:
         clean_term = term.replace("_", " ").title()[:24]
         labels.append(clean_term); term_indices[term] = len(labels) - 1; colors.append("#94a3b8")
-        sources.append(0); targets.append(term_indices[term]); values.append(1.0 / max(len(analysis.term_memberships), 1))
+        sources.append(0); targets.append(term_indices[term]); values.append(1.0 / n_terms)
     cat_indices = {}
     for cat in CATEGORY_SEEDS:
         labels.append(CATEGORY_DISPLAY[cat]); cat_indices[cat] = len(labels) - 1
         colors.append(CATEGORY_COLORS.get(cat, "#64748b"))
+    # Lowered threshold from 0.01 → 0.001 so weak memberships still draw a ribbon.
     for term, memberships in analysis.term_memberships.items():
         for cat, m in memberships.items():
-            if m > 0.01:
+            if m > 0.001:
                 sources.append(term_indices[term]); targets.append(cat_indices[cat]); values.append(float(m))
     labels.append("Final Weights"); colors.append("#636efa"); sink_idx = len(labels) - 1
     for cat in CATEGORY_SEEDS:
         sources.append(cat_indices[cat]); targets.append(sink_idx)
         values.append(float(analysis.category_weights.get(cat, 0)))
-    fig = go.Figure(go.Sankey(node=dict(pad=20, thickness=20, label=labels, color=colors),
-                              link=dict(source=sources, target=targets, value=values)))
-    fig.update_layout(height=520, title="QDWA Flow")
-    fig = apply_qdwa_pub_style(fig, is_axial=False)
+
+    # Build a per-link colour list so the ribbons are tinted by their source category
+    # colour and remain visible even when membership values are tiny.
+    link_colors: List[str] = []
+    cat_color_map = {cat: CATEGORY_COLORS.get(cat, "#64748b") for cat in CATEGORY_SEEDS}
+    for s, t in zip(sources, targets):
+        if s == 0:                      # Query → Term
+            link_colors.append("rgba(99, 110, 250, 0.55)")
+        elif t == sink_idx:             # Category → Final Weights
+            # find which category
+            for cat, idx in cat_indices.items():
+                if idx == s:
+                    link_colors.append(hex_to_rgba(cat_color_map[cat], "cc"))
+                    break
+            else:
+                link_colors.append("rgba(100, 116, 139, 0.55)")
+        else:                            # Term → Category
+            for cat, idx in cat_indices.items():
+                if idx == t:
+                    link_colors.append(hex_to_rgba(cat_color_map[cat], "99"))
+                    break
+            else:
+                link_colors.append("rgba(148, 163, 184, 0.55)")
+
+    # Guarantee non-zero ribbon widths so every link is actually drawn.
+    safe_values = [max(v, 1e-3) for v in values]
+
+    node_line_w = float(cfg.get("line_width", 1.5))
+    node_line_c = cfg.get("line_color", "#1f2937")
+    boundary_w  = float(cfg.get("boundary_width", 1.0))
+    boundary_c  = cfg.get("boundary_color", "#ffffff")
+
+    fig = go.Figure(go.Sankey(
+        arrangement="snap",
+        node=dict(
+            pad=20, thickness=24, label=labels, color=colors,
+            line=dict(color=node_line_c, width=node_line_w),
+        ),
+        link=dict(
+            source=sources, target=targets, value=safe_values,
+            color=link_colors,
+            line=dict(color=boundary_c, width=boundary_w),
+        ),
+    ))
+    title_size = cfg.get("title_size", 16)
+    fig.update_layout(
+        height=int(cfg.get("height", 520)),
+        width=int(cfg.get("width", 900)) if cfg.get("width") else None,
+        title=dict(text="QDWA Flow — Query → Terms → Categories → Final Weights",
+                   font=dict(size=title_size, color=cfg.get("text_color", "#0f172a"))),
+        font=dict(family=cfg.get("font_family", "Inter, sans-serif"),
+                  size=cfg.get("tick_size", 11),
+                  color=cfg.get("text_color", "#0f172a")),
+        paper_bgcolor=cfg.get("paper_color", "#ffffff"),
+    )
     st.plotly_chart(fig, use_container_width=True)
+    # If every term→category ribbon is tiny, surface an explanatory caption.
+    term_cat_values = values[len(analysis.term_memberships) + 1 + len(CATEGORY_SEEDS):]
+    if term_cat_values and max(term_cat_values) < 0.01:
+        st.caption("ℹ️  Term memberships are very small — ribbons are still drawn (min width enforced) so the flow stays visible.")
 
 def render_qdwa_radar_chart(analysis: QDWAAnalysis, theme: Dict[str, str] = None):
     st.markdown("### 🕸️ QDWA Radar: Category Weight Distribution")
+    cfg = _qdwa_inline_panel("qdwa_radar", "Radar — Category Weight Distribution",
+                             show_cmap=False, show_axes=False, show_size=True,
+                             show_lines=True, show_annotation=False)
     categories = [CATEGORY_DISPLAY[k] for k in CATEGORY_SEEDS]
     weights = [analysis.category_weights[k] for k in CATEGORY_SEEDS]
     colors = [CATEGORY_COLORS[k] for k in CATEGORY_SEEDS]
 
-    fig = go.Figure()
-    fig.add_trace(go.Scatterpolar(r=weights + [weights[0]], theta=categories + [categories[0]],
-                                  fill='toself', fillcolor='rgba(231, 76, 60, 0.3)',
-                                  line=dict(color='#E74C3C', width=2), name='W_k'))
-    fig.add_trace(go.Scatterpolar(r=weights, theta=categories, mode='markers+text',
-                                  marker=dict(color=colors, size=12),
-                                  text=[f"{w:.3f}" for w in weights], textposition='top center'))
-    uniform = 1.0 / len(CATEGORY_SEEDS)
-    fig.add_trace(go.Scatterpolar(r=[uniform] * (len(CATEGORY_SEEDS) + 1),
-                                  theta=categories + [categories[0]], mode='lines',
-                                  line=dict(dash='dash', color='gray'), name=f'Uniform ({uniform:.3f})'))
-    fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, max(weights) * 1.2])),
-                      title=f"Concentration c = {analysis.concentration:.3f}", height=450)
+    line_w = float(cfg.get("line_width", 2.0))
+    line_c = cfg.get("line_color", "#E74C3C")
+    fill_alpha = "4D"   # ~30%
+    fill_col = hex_to_rgba(line_c, fill_alpha)
 
-    # Note: is_axial=False for polar charts
-    fig = apply_qdwa_pub_style(fig, is_axial=False)
+    fig = go.Figure()
+    fig.add_trace(go.Scatterpolar(
+        r=weights + [weights[0]], theta=categories + [categories[0]],
+        fill='toself', fillcolor=fill_col,
+        line=dict(color=line_c, width=line_w), name='W_k',
+    ))
+    fig.add_trace(go.Scatterpolar(
+        r=weights, theta=categories, mode='markers+text',
+        marker=dict(color=colors, size=14, line=dict(color=cfg.get("line_color", "#1f2937"), width=1.0)),
+        text=[f"{w:.3f}" for w in weights], textposition='top center',
+        textfont=dict(size=cfg.get("tick_size", 11), color=cfg.get("text_color", "#0f172a")),
+    ))
+    uniform = 1.0 / len(CATEGORY_SEEDS)
+    fig.add_trace(go.Scatterpolar(
+        r=[uniform] * (len(CATEGORY_SEEDS) + 1),
+        theta=categories + [categories[0]], mode='lines',
+        line=dict(dash='dash', color=cfg.get("grid_color", "#9ca3af"), width=max(1.0, line_w * 0.6)),
+        name=f'Uniform ({uniform:.3f})',
+    ))
+    fig.update_layout(
+        polar=dict(
+            radialaxis=dict(visible=True, range=[0, max(weights) * 1.25 if weights else 1.0],
+                            tickfont=dict(size=cfg.get("tick_size", 11), color=cfg.get("text_color", "#0f172a")),
+                            gridcolor=cfg.get("grid_color", "#e5e7eb")),
+            angularaxis=dict(tickfont=dict(size=cfg.get("label_size", 13), color=cfg.get("text_color", "#0f172a")),
+                             gridcolor=cfg.get("grid_color", "#e5e7eb"),
+                             linecolor=cfg.get("line_color", "#1f2937")),
+        ),
+        title=dict(text=f"Concentration c = {analysis.concentration:.3f}",
+                   font=dict(size=cfg.get("title_size", 16), color=cfg.get("text_color", "#0f172a"))),
+        font=dict(family=cfg.get("font_family", "Inter, sans-serif"),
+                  size=cfg.get("tick_size", 11), color=cfg.get("text_color", "#0f172a")),
+        paper_bgcolor=cfg.get("paper_color", "#ffffff"),
+        height=int(cfg.get("height", 450)),
+        width=int(cfg.get("width", 700)) if cfg.get("width") else None,
+    )
     st.plotly_chart(fig, use_container_width=True)
 
 def render_qdwa_bar_comparison(analysis: QDWAAnalysis, theme: Dict[str, str] = None):
     st.markdown("### 📊 QDWA Bar Charts")
-    scale = plotly_continuous_scale(st.session_state.get("qdwa_cmap", "viridis"))
+    cfg = _qdwa_inline_panel("qdwa_bar", "Bar — Raw Evidence vs Smoothed Weight",
+                             show_cmap=True, show_axes=True, show_size=True,
+                             show_lines=True, show_annotation=False)
+    scale = _resolve_scale(cfg)
 
     col1, col2 = st.columns(2)
     with col1:
@@ -2956,42 +3195,70 @@ def render_qdwa_bar_comparison(analysis: QDWAAnalysis, theme: Dict[str, str] = N
                                   "Smoothed W_k": analysis.category_weights.get(k, 0)}
                                  for k in CATEGORY_SEEDS])
         fig1 = px.bar(df_alloc, x="Category", y=["Raw Evidence", "Smoothed W_k"], barmode="group",
-                      title="Raw Evidence vs. Smoothed Weight W_k", color="Smoothed W_k", color_continuous_scale=scale)
-        fig1.update_layout(xaxis_tickangle=-45)
-        fig1 = apply_qdwa_pub_style(fig1, is_axial=True)
+                      title="Raw Evidence vs. Smoothed Weight W_k",
+                      color="Smoothed W_k", color_continuous_scale=scale)
+        fig1.update_traces(marker_line_color=cfg.get("line_color", "#1f2937"),
+                           marker_line_width=float(cfg.get("line_width", 1.5)))
+        fig1.update_xaxes(tickangle=cfg.get("tick_angle", -20))
+        fig1 = _apply_inline_style(fig1, cfg, is_axial=True)
         st.plotly_chart(fig1, use_container_width=True)
 
     with col2:
         W = analysis.category_weights
         H = -sum(w * math.log(w) for w in W.values() if w > 1e-12)
         H_max = math.log(len(CATEGORY_SEEDS))
-        fig2 = go.Figure(go.Bar(x=["H(W)", "H_max=ln(3)", "Deficit"],
-                                y=[H, H_max, H_max - H],
-                                marker_color=[scale[50], scale[150], scale[200]]))
-        fig2.update_layout(title=f"Entropy → c = {analysis.concentration:.4f}", height=400)
-        fig2 = apply_qdwa_pub_style(fig2, is_axial=True)
+        fig2 = go.Figure(go.Bar(
+            x=["H(W)", "H_max=ln(3)", "Deficit"],
+            y=[H, H_max, H_max - H],
+            marker_color=[scale[50], scale[150], scale[200]],
+            marker_line_color=cfg.get("line_color", "#1f2937"),
+            marker_line_width=float(cfg.get("line_width", 1.5)),
+            text=[f"{H:.3f}", f"{H_max:.3f}", f"{H_max - H:.3f}"],
+            textposition="outside",
+        ))
+        fig2.update_layout(title=f"Entropy → c = {analysis.concentration:.4f}")
+        fig2 = _apply_inline_style(fig2, cfg, is_axial=True)
         st.plotly_chart(fig2, use_container_width=True)
 
 def render_qdwa_heatmap(analysis: QDWAAnalysis, theme: Dict[str, str] = None):
     st.markdown("### 🔥 QDWA Heatmap: Term × Category Membership")
     if not analysis.term_memberships:
         st.info("No terms extracted from query."); return
+    cfg = _qdwa_inline_panel("qdwa_heatmap", "Heatmap — Term × Category Membership",
+                             show_cmap=True, show_axes=True, show_size=True,
+                             show_lines=True, show_annotation=True)
+    scale = _resolve_scale(cfg)
+
     df = pd.DataFrame(analysis.term_memberships).T
     df.index = [t.replace("_", " ").title()[:18] for t in df.index]
     df.columns = [CATEGORY_DISPLAY.get(k, k) for k in df.columns]
 
-    # Dynamic colormap injection
-    scale = plotly_continuous_scale(st.session_state.get("qdwa_cmap", "viridis"))
-
     fig = px.imshow(df.values, x=df.columns, y=df.index, color_continuous_scale=scale,
                     labels=dict(x="Category", y="Term", color="m_k(t)"),
                     title="Soft Category Membership m_k(t) per Query Term", aspect="auto")
-    fig.update_layout(height=max(300, len(df) * 40 + 100))
-    fig = apply_qdwa_pub_style(fig, is_axial=True)
+    # Annotated cells (replaces deprecated ff.create_annotated_heatmap behaviour)
+    fig.update_traces(
+        text=df.values.round(4),
+        texttemplate="%{text}",
+        textfont=dict(size=cfg.get("anno_size", 12), color=cfg.get("anno_color", "#000000")),
+        xgap=cfg.get("boundary_width", 1.0),
+        ygap=cfg.get("boundary_width", 1.0),
+    )
+    fig.update_layout(height=int(cfg.get("height", max(300, len(df) * 40 + 100))))
+    fig = _apply_inline_style(fig, cfg, is_axial=True)
     st.plotly_chart(fig, use_container_width=True)
 
 def render_qdwa_chord_matrix(graph: nx.Graph, theme: Dict[str, str] = None):
+    """Category × Category edge-count matrix (annotated heatmap).
+
+    Uses ``go.Heatmap`` + ``texttemplate`` instead of the removed
+    ``plotly.figure_factory.create_annotated_heatmap``.
+    """
     st.markdown("### 🎯 QDWA Chord: Inter-Category Coupling")
+    if graph is None or graph.number_of_edges() == 0:
+        st.info("Graph has no edges — cannot build inter-category coupling matrix.")
+        return
+
     n = len(CATEGORY_SEEDS)
     cats = list(CATEGORY_SEEDS.keys())
     matrix = np.zeros((n, n))
@@ -3000,48 +3267,94 @@ def render_qdwa_chord_matrix(graph: nx.Graph, theme: Dict[str, str] = None):
         if cu in cats and cv in cats:
             i, j = cats.index(cu), cats.index(cv)
             matrix[i][j] += 1
-            if i != j: matrix[j][i] += 1
+            if i != j:
+                matrix[j][i] += 1
     if matrix.sum() == 0:
-        st.info("No inter-category edges."); return
+        st.info("No inter-category edges found in the current graph.")
+        return
 
     cat_labels = [CATEGORY_DISPLAY[k] for k in cats]
-    scale = plotly_continuous_scale(st.session_state.get("qdwa_cmap", "viridis"))
+    cfg = _qdwa_inline_panel("qdwa_chord", "Chord — Inter-Category Coupling Matrix",
+                             show_cmap=True, show_axes=True, show_size=True,
+                             show_lines=True, show_annotation=True)
+    scale = _resolve_scale(cfg)
+    matrix_int = matrix.astype(int)
+    matrix_list = matrix.tolist()
 
-    import plotly.figure_factory as ff
-    fig = ff.create_annotated_heatmap(matrix.tolist(), x=cat_labels, y=cat_labels,
-                                      colorscale=scale, showscale=True,
-                                      annotation_text=matrix.astype(int).tolist())
-    fig.update_layout(title="Category × Category Edge Count Matrix", height=450, xaxis_tickangle=-45)
-    fig = apply_qdwa_pub_style(fig, is_axial=True)
+    fig = go.Figure(go.Heatmap(
+        z=matrix_list,
+        x=cat_labels,
+        y=cat_labels,
+        colorscale=scale,
+        showscale=True,
+        text=matrix_int.tolist(),
+        texttemplate="%{text}",
+        textfont=dict(size=cfg.get("anno_size", 14), color=cfg.get("anno_color", "#000000")),
+        xgap=cfg.get("boundary_width", 1.0),
+        ygap=cfg.get("boundary_width", 1.0),
+        hovertemplate="From: %{y}<br>To: %{x}<br>Edges: %{z:.0f}<extra></extra>",
+    ))
+    fig.update_layout(
+        title=dict(text="Category × Category Edge Count Matrix",
+                   font=dict(size=cfg.get("title_size", 16), color=cfg.get("text_color", "#0f172a"))),
+        height=int(cfg.get("height", 450)),
+    )
+    fig = _apply_inline_style(fig, cfg, is_axial=True)
+    if cfg.get("tick_angle"):
+        fig.update_xaxes(tickangle=cfg["tick_angle"])
+    else:
+        fig.update_xaxes(tickangle=-30)
     st.plotly_chart(fig, use_container_width=True)
+
+    # Companion chord-style summary table (since this is a heatmap, not a true chord)
+    with st.expander("🔢 Edge count table"):
+        edge_df = pd.DataFrame(matrix_int, index=cat_labels, columns=cat_labels)
+        st.dataframe(edge_df, use_container_width=True)
 
 def render_qdwa_strength_conductivity_gauge(analysis: QDWAAnalysis, theme: Dict[str, str] = None):
     """Nanomaterials-specific gauge: Strength-Conductivity Tradeoff Relevance."""
     st.markdown("### ⚡ Strength-Conductivity Tradeoff Relevance")
+    cfg = _qdwa_inline_panel("qdwa_gauge", "Gauge — Strength-Conductivity Tradeoff",
+                             show_cmap=False, show_axes=False, show_size=True,
+                             show_lines=False, show_annotation=False)
     sct_weights = {"nt_cu_electrodeposition": 0.45, "cu_ag_core_shell": 0.30,
                    "def_ag_defect_engineering": 0.25}
     score = sum(analysis.category_weights.get(cat, 0) * w for cat, w in sct_weights.items())
     score = min(score, 1.0)
-    fig = go.Figure(go.Indicator(mode="gauge+number", value=score * 100,
-                                 title={"text": "SCT Relevance %"},
-                                 gauge={'axis': {'range': [0, 100]},
-                                        'bar': {'color': "#10b981" if score > 0.5 else "#f59e0b"},
-                                        'steps': [{'range': [0, 30], 'color': "#fee2e2"},
-                                                  {'range': [30, 60], 'color': "#fef3c7"},
-                                                  {'range': [60, 100], 'color': "#d1fae5"}]}))
-    fig.update_layout(height=250)
-    fig = apply_qdwa_pub_style(fig, is_axial=False)
+    bar_color = "#10b981" if score > 0.5 else "#f59e0b"
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=score * 100,
+        title={"text": "SCT Relevance %", "font": dict(size=cfg.get("title_size", 16), color=cfg.get("text_color", "#0f172a"))},
+        number={"font": dict(size=cfg.get("title_size", 16) + 6, color=cfg.get("text_color", "#0f172a"))},
+        gauge={
+            'axis': {'range': [0, 100],
+                     'tickfont': dict(size=cfg.get("tick_size", 11), color=cfg.get("text_color", "#0f172a"))},
+            'bar': {'color': bar_color, 'line': dict(color=cfg.get("line_color", "#1f2937"), width=float(cfg.get("line_width", 1.5)))},
+            'steps': [{'range': [0, 30], 'color': "#fee2e2"},
+                      {'range': [30, 60], 'color': "#fef3c7"},
+                      {'range': [60, 100], 'color': "#d1fae5"}],
+            'borderwidth': int(cfg.get("boundary_width", 1.0)),
+            'bordercolor': cfg.get("boundary_color", "#ffffff"),
+        },
+    ))
+    fig.update_layout(
+        height=int(cfg.get("height", 260)),
+        width=int(cfg.get("width", 500)) if cfg.get("width") else None,
+        font=dict(family=cfg.get("font_family", "Inter, sans-serif"),
+                  size=cfg.get("tick_size", 11), color=cfg.get("text_color", "#0f172a")),
+        paper_bgcolor=cfg.get("paper_color", "#ffffff"),
+    )
     st.plotly_chart(fig, use_container_width=True)
 
 def render_qdwa_full_dashboard(analysis: QDWAAnalysis, graph: nx.Graph = None, theme: Dict[str, str] = None):
-    """Master render: all QDWA visualizations."""
+    """Master render: all QDWA visualizations, each with its own inline customization panel."""
     if analysis is None:
         st.warning("No QDWA analysis available."); return
 
-    # 👇 INJECT CUSTOMIZATION PANEL HERE 👇
+    # Top-level global panel is still available (drives the Microtransformer tab too)
     render_qdwa_customization_panel()
     st.markdown("---")
-    # ------------------------------------
 
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Primary Domain", CATEGORY_DISPLAY.get(analysis.primary_category, "")[:20])
