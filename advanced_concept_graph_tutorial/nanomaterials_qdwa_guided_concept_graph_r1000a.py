@@ -7501,6 +7501,20 @@ def render_llm_qa_tab(analysis_data: Dict, ontology: Any):
 # ============================================================================
 # VISUALIZATION FUNCTIONS (AgNPs Pattern — tempfile + Glassmorphism JS)
 # ============================================================================
+def abstract_concepts_to_categories(concepts: List[str]) -> Dict[str, str]:
+    """Map a list of concepts to their corresponding nanomaterials categories."""
+    category_map = {}
+    for concept in concepts:
+        concept_lower = concept.lower()
+        category = 'general'
+        for pattern, cat in NANOMAT_DESCRIPTOR_MAPPING.items():
+            if re.search(pattern, concept_lower):
+                category = cat
+                break
+        category_map[concept] = category
+    return category_map
+
+
 def get_nanomat_category_color(
     concept: str, cmap_colors: Optional[List[str]] = None
 ) -> str:
