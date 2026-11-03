@@ -6985,7 +6985,18 @@ class FallbackAnalyzer(LLMQueryAnalyzer):
         elif any(w in q for w in ["why", "cause", "reason", "lead to"]): query_type = "causal"
         elif any(w in q for w in ["how", "improve", "enhance", "optimize", "strategy"]): query_type = "solution"
 
-        highlight_paths = [[src, tgt] for src, rel, tgt in pdef.key_relationships if src in ontology.concepts and tgt in ontology.concepts]
+        # FIX: index positional access instead of tuple unpacking.
+        # Same root cause as get_ontology_concepts() — key_relationships
+        # entries may be either (src, rel, tgt) or (src, rel, tgt, confidence).
+        # The 4-tuple variant previously raised
+        # "ValueError: too many values to unpack (expected 3)" here.
+        highlight_paths = [
+            [rel[0], rel[2]]
+            for rel in pdef.key_relationships
+            if len(rel) >= 3
+            and rel[0] in ontology.concepts
+            and rel[2] in ontology.concepts
+        ]
         total = max(sum(problem_scores.values()), 1)
         
         return QueryAnalysisResult(
