@@ -12,4 +12,6 @@ The qdwa module is implemented in v100 module
 
 [![integratedllmgraphnanomaterials](https://img.shields.io/badge/nanoqdwacg-v1000-yellow)](https://nanomaterials-qdwa-concept-graph1000.streamlit.app/) (Options of query-distilled and weight allocation guided concept graph and default entirety analysis concept graph, Customizable nodes in the Concept Graph, microtransformer)
 
+The 1000a code works fine for the Query Q1NTCU but displays the error "ValueError: too many values to unpack (expected 3)."  for Q2AGNP. The correction is adapted in 1000b code.
+
 
