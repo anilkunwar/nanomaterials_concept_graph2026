@@ -125,37 +125,6 @@ value_col = st.sidebar.selectbox("Value column (bar height)", cols, index=def_id
 weight_col = st.sidebar.selectbox("Weight column (drives color)", cols, index=def_idx_w)
 
 # ----------------------------------------------------------------------------- #
-#  Editable x-axis tick labels  ------------------------------------------------
-# ----------------------------------------------------------------------------- #
-_default_categories = df[cat_col].astype(str).tolist()
-
-st.subheader("✏️ Edit X-axis tick labels")
-st.markdown(
-    "Rename the label shown under each bar. The original category name is on the "
-    "left; type any text on the right (LaTeX math like `$\\\\downarrow$-Ag` works)."
-)
-
-# Persist edits across reruns in session_state keyed by the original label,
-# so changing an unrelated slider doesn't wipe the user's edits.
-edited_labels: list[str] = []
-_cols_per_row = 2
-for i, orig in enumerate(_default_categories):
-    key = f"xlabel_{i}::{orig}"
-    if key not in st.session_state:
-        st.session_state[key] = orig
-    new_val = st.text_input(
-        f"Bar {i+1}", value=st.session_state[key],
-        key=key, help=f"Original: {orig}",
-    )
-    edited_labels.append(new_val)
-
-# Also expose a compact "reset to original" button
-if st.button("Reset X-axis labels to original"):
-    for i, orig in enumerate(_default_categories):
-        st.session_state[f"xlabel_{i}::{orig}"] = orig
-    st.rerun()
-
-# ----------------------------------------------------------------------------- #
 #  2. Labels & title  -------------------------------------------------------------
 # ----------------------------------------------------------------------------- #
 st.sidebar.title("2️⃣ Labels & title")
@@ -296,6 +265,127 @@ cb_aspect      = st.sidebar.slider("Colorbar aspect", 5, 60, 20, 1)
 cb_outline_w   = st.sidebar.slider("Colorbar outline width", 0.0, 5.0, 0.5, 0.1)
 
 # ----------------------------------------------------------------------------- #
+#  Per-bar customization  (main panel, after data preview + all sidebar sections)
+#  Each bar gets its own panel for:
+#    - X-tick label text
+#    - Value-label text override (e.g. "6.33 ± 0.2", "High", or empty=auto)
+#    - Show / hide the value label on this specific bar
+#    - Bar color override (bypass the W_k colormap for one bar)
+#    - Bar alpha override (per-bar transparency)
+# ----------------------------------------------------------------------------- #
+_default_categories = df[cat_col].astype(str).tolist()
+_default_values    = pd.to_numeric(df[value_col], errors="coerce").tolist()
+_n_bars           = len(_default_categories)
+
+st.subheader("🎨 Per-bar customization")
+st.markdown(
+    "Edit each bar individually — its x-tick label, the value label shown on top "
+    "of it (text + visibility), and optional bar color / alpha overrides that "
+    "bypass the W_k colormap. All settings persist across reruns."
+)
+
+edited_labels:        list[str]        = []  # x-tick label text per bar
+val_label_texts:      list[str]        = []  # custom value label text per bar ("" = auto)
+val_label_show:       list[bool]       = []  # show value label on this bar?
+bar_color_overrides:  list[str | None] = []  # hex color or None (use W_k colormap)
+bar_alpha_overrides:  list[float | None] = [] # alpha or None (use global)
+
+# Initialize per-bar session_state defaults
+for i, orig in enumerate(_default_categories):
+    defaults = {
+        f"xlabel_{i}::{orig}":            orig,
+        f"vlabel_text_{i}::{orig}":       "",
+        f"vlabel_show_{i}::{orig}":       True,
+        f"bar_color_override_{i}::{orig}": False,
+        f"bar_color_val_{i}::{orig}":     "#1f77b4",
+        f"bar_alpha_override_{i}::{orig}": False,
+        f"bar_alpha_val_{i}::{orig}":     1.0,
+    }
+    for k, v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
+
+# Render one expander per bar
+for i, orig in enumerate(_default_categories):
+    val = _default_values[i]
+    auto_vtxt = val_label_fmt.format(val) if not pd.isna(val) else ""
+    with st.expander(
+        f"Bar {i+1}: {orig}",
+        expanded=(i < 2),
+    ):
+        cc1, cc2 = st.columns(2)
+        with cc1:
+            new_xlab = st.text_input(
+                "X-tick label",
+                value=st.session_state[f"xlabel_{i}::{orig}"],
+                key=f"xlabel_{i}::{orig}",
+                help=f"Original: {orig}",
+            )
+            edited_labels.append(new_xlab)
+        with cc2:
+            new_vshow = st.checkbox(
+                "Show value label on this bar",
+                value=st.session_state[f"vlabel_show_{i}::{orig}"],
+                key=f"vlabel_show_{i}::{orig}",
+            )
+            val_label_show.append(new_vshow)
+
+        new_vtxt = st.text_input(
+            f"Custom value label text (empty = auto: '{auto_vtxt}')",
+            value=st.session_state[f"vlabel_text_{i}::{orig}"],
+            key=f"vlabel_text_{i}::{orig}",
+            help=(
+                f"Leave empty to use the global format '{val_label_fmt}' applied to "
+                f"the value ({auto_vtxt}). LaTeX math like $\\\\pm$ 0.2 works."
+            ),
+        )
+        val_label_texts.append(new_vtxt)
+
+        cc3, cc4 = st.columns(2)
+        with cc3:
+            color_ov = st.checkbox(
+                "Override bar color (bypass W_k colormap)",
+                value=st.session_state[f"bar_color_override_{i}::{orig}"],
+                key=f"bar_color_override_{i}::{orig}",
+            )
+            if color_ov:
+                color_val = st.color_picker(
+                    "Bar color",
+                    value=st.session_state[f"bar_color_val_{i}::{orig}"],
+                    key=f"bar_color_val_{i}::{orig}",
+                )
+                bar_color_overrides.append(color_val)
+            else:
+                bar_color_overrides.append(None)
+        with cc4:
+            alpha_ov = st.checkbox(
+                "Override bar alpha",
+                value=st.session_state[f"bar_alpha_override_{i}::{orig}"],
+                key=f"bar_alpha_override_{i}::{orig}",
+            )
+            if alpha_ov:
+                alpha_val = st.slider(
+                    "Bar alpha", 0.1, 1.0,
+                    st.session_state[f"bar_alpha_val_{i}::{orig}"], 0.05,
+                    key=f"bar_alpha_val_{i}::{orig}",
+                )
+                bar_alpha_overrides.append(alpha_val)
+            else:
+                bar_alpha_overrides.append(None)
+
+if st.button("Reset all per-bar customizations"):
+    for i, orig in enumerate(_default_categories):
+        for prefix in (
+            "xlabel", "vlabel_text", "vlabel_show",
+            "bar_color_override", "bar_color_val",
+            "bar_alpha_override", "bar_alpha_val",
+        ):
+            k = f"{prefix}_{i}::{orig}"
+            if k in st.session_state:
+                del st.session_state[k]
+    st.rerun()
+
+# ----------------------------------------------------------------------------- #
 #  Build the figure
 # ----------------------------------------------------------------------------- #
 def build_figure() -> plt.Figure:
@@ -336,6 +426,25 @@ def build_figure() -> plt.Figure:
     norm = mpl.colors.Normalize(vmin=wmin, vmax=wmax)
     colors = [cmap(norm(w)) for w in weights]
 
+    # Apply per-bar color overrides (bypass W_k colormap)
+    try:
+        _overrides_c = list(bar_color_overrides)
+    except NameError:
+        _overrides_c = []
+    for i, ov in enumerate(_overrides_c):
+        if ov is not None and i < len(colors):
+            colors[i] = ov
+
+    # Per-bar alpha overrides
+    try:
+        _overrides_a = list(bar_alpha_overrides)
+    except NameError:
+        _overrides_a = []
+    bar_alphas = [bar_alpha] * len(values)
+    for i, ov in enumerate(_overrides_a):
+        if ov is not None and i < len(bar_alphas):
+            bar_alphas[i] = ov
+
     hatch = bar_hatch if bar_hatch else None
     bars = ax.bar(
         categories, values,
@@ -343,22 +452,42 @@ def build_figure() -> plt.Figure:
         color=colors,
         edgecolor=edge_color,
         linewidth=edge_width,
-        alpha=bar_alpha,
+        alpha=bar_alpha,  # global alpha (matplotlib applies this to all bars)
         hatch=hatch,
     )
+    # Apply per-bar alpha after the fact (matplotlib's bar() doesn't accept a list for alpha)
+    for b, a in zip(bars, bar_alphas):
+        b.set_alpha(a)
 
-    # Value labels on top of bars
-    if show_val_labels:
-        ymax = float(np.nanmax(values)) if len(values) else 1.0
-        for b, v in zip(bars, values):
-            if not np.isnan(v):
-                ax.text(
-                    b.get_x() + b.get_width() / 2,
-                    v + ymax * val_label_off,
-                    val_label_fmt.format(v),
-                    ha="center", va="bottom",
-                    fontsize=tick_size, family=font_family,
-                )
+    # Value labels on top of bars (per-bar control)
+    # Use the global show_val_labels toggle, but also respect per-bar show/hide
+    # and per-bar custom text overrides.
+    try:
+        _vtxts  = list(val_label_texts)
+        _vshows = list(val_label_show)
+    except NameError:
+        _vtxts  = []
+        _vshows = []
+    ymax = float(np.nanmax(values)) if len(values) else 1.0
+    for i, (b, v) in enumerate(zip(bars, values)):
+        if np.isnan(v):
+            continue
+        this_show = show_val_labels
+        if i < len(_vshows):
+            this_show = this_show and bool(_vshows[i])
+        if not this_show:
+            continue
+        if i < len(_vtxts) and _vtxts[i].strip() != "":
+            txt = _vtxts[i]
+        else:
+            txt = val_label_fmt.format(v)
+        ax.text(
+            b.get_x() + b.get_width() / 2,
+            v + ymax * val_label_off,
+            txt,
+            ha="center", va="bottom",
+            fontsize=tick_size, family=font_family,
+        )
 
     # Labels & title
     ax.set_title(title_text, fontsize=title_size, family=font_family,
@@ -478,6 +607,30 @@ colors = [cmap(norm(w)) for w in df[{weight_col!r}]]
 bars = ax.bar(df[{cat_col!r}], df[{value_col!r}],
               width={bar_width}, color=colors,
               edgecolor={edge_color!r}, linewidth={edge_width}, alpha={bar_alpha})
+
+# Per-bar overrides (color, alpha, value-label text/visibility)
+_bar_color_ov = {bar_color_overrides!r}
+_bar_alpha_ov = {bar_alpha_overrides!r}
+_val_texts    = {val_label_texts!r}
+_val_show     = {val_label_show!r}
+for i, b in enumerate(bars):
+    if i < len(_bar_color_ov) and _bar_color_ov[i] is not None:
+        b.set_color(_bar_color_ov[i])
+    if i < len(_bar_alpha_ov) and _bar_alpha_ov[i] is not None:
+        b.set_alpha(_bar_alpha_ov[i])
+_xlabels = {edited_labels!r}
+ax.set_xticks(range(len(_xlabels)))
+ax.set_xticklabels(_xlabels)
+_ymax = df[{value_col!r}].max()
+for i, (b, v) in enumerate(zip(bars, df[{value_col!r}])):
+    if not _val_show[i]:
+        continue
+    if _val_texts[i].strip():
+        _t = _val_texts[i]
+    else:
+        _t = "{val_label_fmt}".format(v)
+    ax.text(b.get_x() + b.get_width()/2, v + _ymax*{val_label_off},
+            _t, ha="center", va="bottom", fontsize={tick_size})
 
 ax.set_title({title_text!r}, fontsize={title_size}, weight={title_weight!r})
 ax.set_xlabel({xlabel_txt!r}, fontsize={label_size})
