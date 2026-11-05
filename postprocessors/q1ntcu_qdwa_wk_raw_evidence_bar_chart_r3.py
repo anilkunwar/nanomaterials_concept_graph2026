@@ -305,6 +305,145 @@ for i, orig in enumerate(_default_categories):
         if k not in st.session_state:
             st.session_state[k] = v
 
+# ----------------------------------------------------------------------------- #
+#  Symbol palette  --------------------------------------------------------------
+#  Clickable buttons that append LaTeX snippets to a chosen target field
+#  (a bar's X-tick label or value-label text). All snippets are wrapped in
+#  $...$ so they render correctly whether or not the global "Render X-tick
+#  labels as LaTeX" toggle is on.
+# ----------------------------------------------------------------------------- #
+SYMBOL_GROUPS: dict[str, list[tuple[str, str]]] = {
+    "Geometry / crystallography": [
+        ("\u22a5",   r"$\perp$"),        # \u22a5 = \u22a5 (inverted T / perpendicular)
+        ("\u2225",   r"$\parallel$"),    # parallel
+        ("\u2220",   r"$\angle$"),       # angle
+        ("\u0394",   r"$\Delta$"),       # Delta (lattice / difference)
+        ("\u2207",   r"$\nabla$"),       # nabla
+        ("\u2248",   r"$\approx$"),      # approx
+        ("\u2261",   r"$\equiv$"),       # identical
+        ("\u00b0",   r"$^\circ$"),       # degree
+    ],
+    "Arrows": [
+        ("\u2191", r"$\uparrow$"),
+        ("\u2193", r"$\downarrow$"),
+        ("\u2190", r"$\leftarrow$"),
+        ("\u2192", r"$\rightarrow$"),
+        ("\u2194", r"$\leftrightarrow$"),
+        ("\u21c4", r"$\rightleftharpoons$"),
+        ("\u21d2", r"$\Rightarrow$"),
+        ("\u21d0", r"$\Leftarrow$"),
+        ("\u21d4", r"$\Leftrightarrow$"),
+    ],
+    "Greek lowercase": [
+        ("\u03b1", r"$\alpha$"), ("\u03b2", r"$\beta$"),
+        ("\u03b3", r"$\gamma$"), ("\u03b4", r"$\delta$"),
+        ("\u03b5", r"$\epsilon$"), ("\u03b6", r"$\zeta$"),
+        ("\u03b7", r"$\eta$"), ("\u03b8", r"$\theta$"),
+        ("\u03b9", r"$\iota$"), ("\u03ba", r"$\kappa$"),
+        ("\u03bb", r"$\lambda$"), ("\u03bc", r"$\mu$"),
+        ("\u03bd", r"$\nu$"), ("\u03be", r"$\xi$"),
+        ("\u03c0", r"$\pi$"), ("\u03c1", r"$\rho$"),
+        ("\u03c3", r"$\sigma$"), ("\u03c4", r"$\tau$"),
+        ("\u03c5", r"$\upsilon$"), ("\u03c6", r"$\phi$"),
+        ("\u03c7", r"$\chi$"), ("\u03c8", r"$\psi$"),
+        ("\u03c9", r"$\omega$"),
+    ],
+    "Greek uppercase": [
+        ("\u0393", r"$\Gamma$"), ("\u0394", r"$\Delta$"),
+        ("\u0398", r"$\Theta$"), ("\u039b", r"$\Lambda$"),
+        ("\u039e", r"$\Xi$"), ("\u03a0", r"$\Pi$"),
+        ("\u03a3", r"$\Sigma$"), ("\u03a6", r"$\Phi$"),
+        ("\u03a8", r"$\Psi$"), ("\u03a9", r"$\Omega$"),
+    ],
+    "Math relations / operators": [
+        ("\u00b1", r"$\pm$"),
+        ("\u2213", r"$\mp$"),
+        ("\u00d7", r"$\times$"),
+        ("\u00f7", r"$\div$"),
+        ("\u22c5", r"$\cdot$"),
+        ("\u2260", r"$\neq$"),
+        ("\u2264", r"$\leq$"),
+        ("\u2265", r"$\geq$"),
+        ("\u221d", r"$\propto$"),
+        ("\u221e", r"$\infty$"),
+        ("\u2211", r"$\sum$"),
+        ("\u222b", r"$\int$"),
+        ("\u221a", r"$\sqrt{}$"),
+    ],
+    "Subscripts / superscripts": [
+        ("\u00b2", r"$^2$"), ("\u00b3", r"$^3$"),
+        ("\u2070", r"$^0$"), ("\u2071", r"$^1$"),
+        ("\u207f", r"$^n$"), ("\u1d4f", r"$^k$"),
+        ("\u2080", r"$_0$"), ("\u2081", r"$_1$"),
+        ("\u2082", r"$_2$"), ("\u2096", r"$_k$"),
+        ("\u2099", r"$_n$"), ("\u2098", r"$_m$"),
+    ],
+    "Misc / dingbats": [
+        ("\u2605", r"$\star$"),
+        ("\u2020", r"$\dagger$"),
+        ("\u2021", r"$\ddagger$"),
+        ("\u00a7", r"$\S$"),
+        ("\u00b6", r"$\P$"),
+        ("\u2113", r"$\ell$"),
+        ("\u210f", r"$\hbar$"),
+        ("\u00c5", r"$\AA$"),  # Angstrom
+        ("\u00b5", r"$\mu$"),  # micro
+    ],
+}
+
+st.subheader("\U0001f5ce Symbol palette")
+st.markdown(
+    "Pick a target field below, then click any symbol to **append** its LaTeX "
+    "snippet to that field. All snippets are wrapped in `$...$` so they render "
+    "correctly whether or not the sidebar's *Render X-tick labels as LaTeX* "
+    "toggle is on. Example: clicking \u22a5 inserts `$\\perp$` which renders as "
+    "an inverted-T (perpendicular symbol)."
+)
+
+# Build target options (bar index + field name + session_state key)
+_target_options: list[tuple[str, str]] = []
+_target_keys:    list[str] = []
+for i, orig in enumerate(_default_categories):
+    # X-tick label target
+    _target_options.append((f"Bar {i+1} \u2014 X-tick label", f"xlabel_{i}::{orig}"))
+    _target_keys.append(f"xlabel_{i}::{orig}")
+    # Value-label text target
+    _target_options.append((f"Bar {i+1} \u2014 value-label text", f"vlabel_text_{i}::{orig}"))
+    _target_keys.append(f"vlabel_text_{i}::{orig}")
+
+_target_idx = st.selectbox(
+    "Insert symbols into:",
+    range(len(_target_options)),
+    format_func=lambda x: _target_options[x][0],
+    index=0,
+)
+_target_key = _target_keys[_target_idx]
+_target_label, _target_field = _target_options[_target_idx]
+
+st.markdown(f"**Current target:** {_target_label}")
+st.markdown(
+    f"&nbsp;&nbsp;Current value: "
+    f"`{st.session_state.get(_target_key, '')}`"
+)
+
+# Render the symbol groups as rows of buttons (8 per row)
+for grp_name, symbols in SYMBOL_GROUPS.items():
+    st.markdown(f"**{grp_name}**")
+    for row_start in range(0, len(symbols), 8):
+        row = symbols[row_start:row_start + 8]
+        btn_cols = st.columns(8)
+        for j, (display, snippet) in enumerate(row):
+            global_j = row_start + j
+            if btn_cols[j].button(
+                display,
+                key=f"sym_{_target_key}_{grp_name}_{global_j}",
+                use_container_width=True,
+            ):
+                st.session_state[_target_key] = st.session_state.get(_target_key, "") + snippet
+                st.rerun()
+
+
+
 # Render one expander per bar
 for i, orig in enumerate(_default_categories):
     val = _default_values[i]
