@@ -8,5 +8,5 @@ Q1-NTCU
 
 Q3-CS
 
-[![integratedllmgraphnanomaterials](https://img.shields.io/badge/q3csqdwa-v3-green)](https://q3coreshell-sigma-qdwa-wk-raw-evidence-barchart1.streamlit.app/) 
+[![integratedllmgraphnanomaterials](https://img.shields.io/badge/q3csqdwa-v1-green)](https://q3coreshell-sigma-qdwa-wk-raw-evidence-barchart1.streamlit.app/) 
 
