@@ -1,4 +1,3 @@
-
 """
 Streamlit app: W_k-weighted bar chart with full customization
 ================================================================
@@ -129,6 +128,69 @@ def_idx_w  = cols.index("W_k")   if "W_k"   in cols else (1 if len(cols) > 1 els
 cat_col   = st.sidebar.selectbox("Category column (x-axis)", cols, index=def_idx_cat)
 value_col = st.sidebar.selectbox("Value column (bar height)", cols, index=def_idx_val)
 weight_col = st.sidebar.selectbox("Weight column (drives color)", cols, index=def_idx_w)
+
+# ----------------------------------------------------------------------------- #
+#  Bar ordering  ----------------------------------------------------------------
+# ----------------------------------------------------------------------------- #
+st.sidebar.markdown("**Bar ordering**")
+order_options = [
+    "Original CSV order (Rank)",
+    "By weight (highest first)  \u2014 default",
+    "By weight (lowest first)",
+    "By value (highest first)",
+    "By value (lowest first)",
+    "Category A \u2192 Z (alphabetical)",
+    "Category Z \u2192 A (reverse alphabetical)",
+    "Custom order (specify below)",
+]
+order_mode = st.sidebar.selectbox("Bar order", order_options, index=1,
+    help="Reorder the bars along the x-axis. The default sorts by W_k descending "
+         "(highest-weight category first), matching the reference figure.")
+
+_custom_order_str = ""
+if order_mode == "Custom order (specify below)":
+    _custom_order_str = st.sidebar.text_area(
+        "Custom category order (one per line, or comma-separated)",
+        value="\n".join(df[cat_col].astype(str).tolist()),
+        help="List the categories in the order you want them to appear on the x-axis. "
+             "You can also paste a comma-separated list.",
+        height=120,
+    )
+
+def _apply_order(d: pd.DataFrame, mode: str, custom: str) -> pd.DataFrame:
+    """Return a copy of `d` reordered according to `mode`."""
+    if mode == "Original CSV order (Rank)":
+        return d.reset_index(drop=True)
+    if mode == "By weight (highest first)  \u2014 default":
+        return d.sort_values(weight_col, ascending=False, kind="stable").reset_index(drop=True)
+    if mode == "By weight (lowest first)":
+        return d.sort_values(weight_col, ascending=True, kind="stable").reset_index(drop=True)
+    if mode == "By value (highest first)":
+        return d.sort_values(value_col, ascending=False, kind="stable").reset_index(drop=True)
+    if mode == "By value (lowest first)":
+        return d.sort_values(value_col, ascending=True, kind="stable").reset_index(drop=True)
+    if mode == "Category A \u2192 Z (alphabetical)":
+        return d.sort_values(cat_col, ascending=True, kind="stable").reset_index(drop=True)
+    if mode == "Category Z \u2192 A (reverse alphabetical)":
+        return d.sort_values(cat_col, ascending=False, kind="stable").reset_index(drop=True)
+    if mode == "Custom order (specify below)":
+        sep = "\n" if "\n" in custom else ","
+        ordered_names = [c.strip() for c in custom.split(sep) if c.strip()]
+        name_to_row = {str(r[cat_col]): r for _, r in d.iterrows()}
+        seen, ordered_rows = set(), []
+        for name in ordered_names:
+            if name in name_to_row and name not in seen:
+                ordered_rows.append(name_to_row[name])
+                seen.add(name)
+        for _, r in d.iterrows():
+            n = str(r[cat_col])
+            if n not in seen:
+                ordered_rows.append(r)
+                seen.add(n)
+        return pd.DataFrame(ordered_rows).reset_index(drop=True)
+    return d.reset_index(drop=True)
+
+df = _apply_order(df, order_mode, _custom_order_str)
 
 # ----------------------------------------------------------------------------- #
 #  2. Labels & title  -------------------------------------------------------------
