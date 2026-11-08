@@ -10,3 +10,6 @@ Q3-CS
 
 [![integratedllmgraphnanomaterials](https://img.shields.io/badge/q3csqdwa-v1-green)](https://q3coreshell-sigma-qdwa-wk-raw-evidence-barchart1.streamlit.app/) 
 
+[![integratedllmgraphnanomaterials](https://img.shields.io/badge/q3csqdwa-v2-green)](https://q3coreshell-sigma-qdwa-wk-raw-evidence-barchart2.streamlit.app/) (the category labels can be presented in any order)
+
+
